@@ -1,6 +1,7 @@
 /**
  * Nightly crawl. Usage:
  *   npm run crawl -- --zone <zoneId> [--encounter <encounterId>,...] [--difficulty mythic,heroic] [--pages 2] [--metrics progress,speed]
+ * --pages limits the speed crawl only; the progress crawl resumes where the last run stopped and walks to the end.
  * The zone id is in the raid's Warcraft Logs URL (warcraftlogs.com/zone/rankings/<zoneId>).
  * Without --encounter, every boss in the zone is crawled.
  * "progress" crawls guilds' first kills (cheap: one ranking entry is one first kill) and runs first, for every boss,
@@ -39,10 +40,11 @@ async function main() {
     console.log(`${zone.name}: ${zone.encounters.map((e) => `${e.name} (${e.id})`).join(", ")}`);
     encounterIds = zone.encounters.map((e) => e.id);
   }
-  for (const metric of values.metrics!.split(",") as RankingMetric[]) {
+  const before = await wcl.rateLimit();
+  run: for (const metric of values.metrics!.split(",") as RankingMetric[]) {
     for (const encounterId of encounterIds) {
       for (const difficulty of values.difficulty!.split(",") as Difficulty[]) {
-        const saved = await crawlBoss(wcl, {
+        const { saved, stopped } = await crawlBoss(wcl, {
           zoneId: Number(values.zone),
           encounterId,
           difficulty,
@@ -51,9 +53,14 @@ async function main() {
           reservePoints: Number(values.reserve),
         });
         console.log(`Encounter ${encounterId} ${difficulty} ${metric}: ${saved} new kills`);
+        if (stopped) break run;
       }
     }
   }
+  const after = await wcl.rateLimit();
+  // The hour can roll over mid-run, which resets the counter.
+  const used = after.pointsSpentThisHour >= before.pointsSpentThisHour ? after.pointsSpentThisHour - before.pointsSpentThisHour : after.pointsSpentThisHour;
+  console.log(`Warcraft Logs points: ${used} used this run, ${after.pointsSpentThisHour}/${after.limitPerHour} this hour`);
   await db().end();
 }
 

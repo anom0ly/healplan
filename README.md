@@ -45,7 +45,7 @@ The app runs as two services in one Railway project, sharing one Postgres databa
    - `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET` from your Warcraft Logs API client
 4. **Expose the site.** In the web service, open **Settings → Networking → Generate Domain**. Set the healthcheck path to `/api/health`.
 5. **Add the nightly crawler.** Choose **+ New → GitHub Repo**, pick `anom0ly/healplan` again, and name the service `crawler`. In its settings:
-   - **Custom Start Command:** `npm run crawl -- --zone <zoneId> --difficulty mythic,heroic --pages 2`. Each run first walks every boss's **progress** rankings (each guild's first kill, in the order guilds got them), then the **speed** rankings for recent kills.
+   - **Custom Start Command:** `npm run crawl -- --zone <zoneId> --difficulty mythic,heroic --pages 2`. Each run first walks every boss's **progress** rankings (each guild's first kill, in the order guilds got them), carrying on from the page the last run reached until it has them all, then the first `--pages` pages of **speed** rankings for recent kills.
    - **Cron Schedule:** `0 10 * * *` (10:00 UTC daily, after NA raid nights end)
    - The same three variables as the web service
    - The crawl exits when done, which Railway's cron jobs require. Both services create the database tables on start if they're missing.
@@ -53,7 +53,7 @@ The app runs as two services in one Railway project, sharing one Postgres databa
 
 When a new raid tier opens, change `--zone` in the crawler's start command to the new raid's zone id.
 
-The free Warcraft Logs API tier allows 3,600 points an hour. The crawler checks its remaining points before every kill and stops with 300 left (`--reserve`). The next night's run continues where it left off, because kills already saved are skipped.
+The free Warcraft Logs API tier allows 3,600 points an hour. The crawler checks its remaining points before every rankings page and every kill, ends the run with 300 left (`--reserve`), and logs the points it used. The next run continues where it left off, because kills already saved are skipped and the progress crawl remembers its page. Because each run stops at the hourly limit, an hourly schedule (`0 * * * *`) is safe and fills in a new raid much faster than a daily one.
 
 ## Status
 

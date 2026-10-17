@@ -39,3 +39,13 @@ CREATE TABLE IF NOT EXISTS guild_kill_history (
   updated_at     timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (guild_id, encounter_id, difficulty)
 );
+
+-- Where each resumable rankings crawl got to, so the next run carries on from there.
+CREATE TABLE IF NOT EXISTS crawl_pages (
+  encounter_id integer NOT NULL,
+  difficulty   text    NOT NULL,
+  metric       text    NOT NULL,
+  next_page    integer NOT NULL,
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (encounter_id, difficulty, metric)
+);

@@ -107,3 +107,20 @@ export async function saveGuildKillHistory(guildId: number, encounterId: number,
     [guildId, encounterId, difficulty, JSON.stringify(h.kills), h.firstConfirmed],
   );
 }
+
+/** The rankings page a resumable crawl should start from, or null when it hasn't run yet. */
+export async function getCrawlPage(encounterId: number, difficulty: Difficulty, metric: string): Promise<number | null> {
+  const r = await db().query(
+    "SELECT next_page FROM crawl_pages WHERE encounter_id = $1 AND difficulty = $2 AND metric = $3",
+    [encounterId, difficulty, metric],
+  );
+  return r.rows[0]?.next_page ?? null;
+}
+
+export async function saveCrawlPage(encounterId: number, difficulty: Difficulty, metric: string, nextPage: number) {
+  await db().query(
+    `INSERT INTO crawl_pages (encounter_id, difficulty, metric, next_page) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (encounter_id, difficulty, metric) DO UPDATE SET next_page = EXCLUDED.next_page, updated_at = now()`,
+    [encounterId, difficulty, metric, nextPage],
+  );
+}

@@ -108,7 +108,7 @@ export async function reportPulls(wcl: WclClient, code: string, encounterId: num
 }
 
 interface PlayerDetailsJson {
-  data: { playerDetails: { healers: { name: string; type: string; specs?: { spec: string }[] }[] } };
+  data: { playerDetails: { healers: { id: number; name: string; type: string; specs?: { spec: string }[] }[] } };
 }
 
 /** Healer names and specs in a fight, e.g. { name: "Foo", spec: "RestorationDruid" }. */
@@ -120,6 +120,7 @@ export async function fightHealers(wcl: WclClient, code: string, fightId: number
     { code, fightIDs: [fightId] },
   );
   return d.reportData.report.playerDetails.data.playerDetails.healers.map((h) => ({
+    actorId: h.id,
     name: h.name,
     spec: `${h.specs?.[0]?.spec ?? ""}${h.type}`,
   }));
@@ -183,4 +184,39 @@ export async function zoneEncounters(wcl: WclClient, zoneId: number) {
   );
   if (!d.worldData.zone) throw new Error(`Unknown Warcraft Logs zone ${zoneId}`);
   return d.worldData.zone;
+}
+
+/** Ability names for a report's spell ids. */
+export async function reportAbilities(wcl: WclClient, code: string) {
+  const d = await wcl.query<{
+    reportData: { report: { masterData: { abilities: { gameID: number; name: string }[] } } };
+  }>(`query($code: String!) { reportData { report(code: $code) { masterData { abilities { gameID name } } } } }`, { code });
+  return new Map(d.reportData.report.masterData.abilities.map((a) => [a.gameID, a.name]));
+}
+
+/** Every cast event by the given actors in one fight, following pagination. */
+export async function actorCasts(
+  wcl: WclClient,
+  code: string,
+  fight: { id: number; startTime: number; endTime: number },
+  actorIds: number[],
+): Promise<RawCast[]> {
+  const out: RawCast[] = [];
+  let start: number | null = fight.startTime;
+  while (start !== null) {
+    const d: { reportData: { report: { events: { data: RawCast[]; nextPageTimestamp: number | null } } } } =
+      await wcl.query(
+        `query($code: String!, $fightIDs: [Int]!, $start: Float!, $end: Float!, $filter: String!) {
+          reportData { report(code: $code) {
+            events(fightIDs: $fightIDs, startTime: $start, endTime: $end, dataType: Casts, filterExpression: $filter) {
+              data nextPageTimestamp
+            }
+          } }
+        }`,
+        { code, fightIDs: [fight.id], start, end: fight.endTime, filter: `source.id in (${actorIds.join(",")})` },
+      );
+    out.push(...d.reportData.report.events.data);
+    start = d.reportData.report.events.nextPageTimestamp;
+  }
+  return out;
 }

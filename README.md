@@ -4,6 +4,8 @@ Enter your healing team and a boss, and see when guilds with the same healing co
 
 Mythic and Heroic are both supported.
 
+**Live site:** <https://healplan-production.up.railway.app/>
+
 ## How it works
 
 1. **Nightly crawl** (`npm run crawl`) walks Warcraft Logs speed rankings for each boss. For every new kill it:

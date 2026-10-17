@@ -25,4 +25,18 @@ describe("fightRankings", () => {
     const result = await fightRankings(clientReturning({ error: "Invalid page" }), 1, 5, 40, "progress");
     expect(result).toEqual({ fights: [], hasMorePages: false, note: "Invalid page" });
   });
+
+  it("passes the region filter to the API", async () => {
+    let variables: Record<string, unknown> = {};
+    const wcl = {
+      query: async (_q: string, v: Record<string, unknown>) => {
+        variables = v;
+        return { worldData: { encounter: { fightRankings: { hasMorePages: false, rankings: [] } } } };
+      },
+    } as unknown as WclClient;
+    await fightRankings(wcl, 1, 5, 1, "progress", "EU");
+    expect(variables).toMatchObject({ metric: "progress", region: "EU" });
+    await fightRankings(wcl, 1, 5, 1, "speed");
+    expect(variables.region).toBeNull();
+  });
 });

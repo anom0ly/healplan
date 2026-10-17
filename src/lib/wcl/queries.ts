@@ -24,19 +24,21 @@ interface FightRankingsJson {
 /** "speed" ranks the fastest kills; "progress" ranks guilds' first kills in the order they happened. */
 export type RankingMetric = "speed" | "progress";
 
-/** Kills on one boss, ranked by the metric. Each page holds up to 100 fights. */
+/** Kills on one boss, ranked by the metric. Each page holds up to 100 fights, and the API serves at most 20 pages. */
 export async function fightRankings(
   wcl: WclClient,
   encounterId: number,
   difficulty: number,
   page: number,
   metric: RankingMetric = "speed",
+  /** Limits rankings to one region, e.g. "US"; each region has its own 20-page cap. */
+  region?: string,
 ) {
   const d = await wcl.query<{ worldData: { encounter: { fightRankings: FightRankingsJson } } }>(
-    `query($id: Int!, $difficulty: Int!, $page: Int!, $metric: FightRankingMetricType!) {
-      worldData { encounter(id: $id) { fightRankings(difficulty: $difficulty, metric: $metric, page: $page) } }
+    `query($id: Int!, $difficulty: Int!, $page: Int!, $metric: FightRankingMetricType!, $region: String) {
+      worldData { encounter(id: $id) { fightRankings(difficulty: $difficulty, metric: $metric, page: $page, serverRegion: $region) } }
     }`,
-    { id: encounterId, difficulty, page, metric },
+    { id: encounterId, difficulty, page, metric, region: region ?? null },
   );
   const json = d.worldData.encounter.fightRankings;
   if (!Array.isArray(json?.rankings)) {

@@ -150,6 +150,8 @@ export interface CrawlOptions {
   difficulty: Difficulty;
   /** "progress" walks guilds' first kills in the order they happened; "speed" walks the fastest kills. */
   metric: RankingMetric;
+  /** Limits the crawl to one region's rankings, e.g. "US". */
+  region?: string;
   /** Pages of speed rankings to walk, 100 kills each. Progress rankings are always walked to the end. */
   pages: number;
   /** Stop when this many points are left in the hour, to leave room for on-demand imports. */
@@ -174,16 +176,27 @@ export async function overBudget(wcl: WclClient, reservePoints: number, log: (ms
 export async function crawlBoss(wcl: WclClient, opts: CrawlOptions) {
   const log = opts.log ?? console.log;
   const resumable = opts.metric === "progress";
+  // Each region's progress crawl keeps its own place in the rankings.
+  const cursorKey = opts.region ? `${opts.metric}:${opts.region}` : opts.metric;
   let saved = 0;
-  let page = resumable ? ((await getCrawlPage(opts.encounterId, opts.difficulty, opts.metric)) ?? 1) : 1;
+  let page = resumable ? ((await getCrawlPage(opts.encounterId, opts.difficulty, cursorKey)) ?? 1) : 1;
   const stop = async () => {
-    if (resumable) await saveCrawlPage(opts.encounterId, opts.difficulty, opts.metric, page);
+    if (resumable) await saveCrawlPage(opts.encounterId, opts.difficulty, cursorKey, page);
     return { saved, stopped: true };
   };
   for (; resumable || page <= opts.pages; page++) {
     if (await overBudget(wcl, opts.reservePoints, log)) return stop();
-    const { fights, hasMorePages, note } = await fightRankings(wcl, opts.encounterId, DIFFICULTY_ID[opts.difficulty], page, opts.metric);
-    if (note) log(`No ${opts.metric} rankings page ${page} for encounter ${opts.encounterId} ${opts.difficulty}: ${note}`);
+    const label = `${opts.metric}${opts.region ? ` ${opts.region}` : ""} rankings page ${page} for encounter ${opts.encounterId} ${opts.difficulty}`;
+    let ranking: Awaited<ReturnType<typeof fightRankings>>;
+    try {
+      ranking = await fightRankings(wcl, opts.encounterId, DIFFICULTY_ID[opts.difficulty], page, opts.metric, opts.region);
+    } catch (e) {
+      // A failed rankings request ends this boss for the run rather than the whole crawl.
+      log(`Couldn't read ${label}: ${(e as Error).message}`);
+      return { saved, stopped: false };
+    }
+    const { fights, hasMorePages, note } = ranking;
+    if (note) log(`No ${label}: ${note}`);
     for (const ranked of fights) {
       if (await hasKill(ranked.reportCode, ranked.fightId)) continue;
       if (await overBudget(wcl, opts.reservePoints, log)) return stop();
@@ -199,7 +212,7 @@ export async function crawlBoss(wcl: WclClient, opts: CrawlOptions) {
       }
     }
     // The last page can still fill up, so the next run starts by re-reading it.
-    if (resumable) await saveCrawlPage(opts.encounterId, opts.difficulty, opts.metric, hasMorePages ? page + 1 : page);
+    if (resumable) await saveCrawlPage(opts.encounterId, opts.difficulty, cursorKey, hasMorePages ? page + 1 : page);
     if (!hasMorePages) break;
   }
   return { saved, stopped: false };

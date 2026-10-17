@@ -1,7 +1,8 @@
 /**
  * Nightly crawl. Usage:
  *   npm run crawl -- --zone <zoneId> [--encounter <encounterId>,...] [--difficulty mythic,heroic] [--pages 2] [--metrics progress,speed]
- * --pages limits the speed crawl only; the progress crawl resumes where the last run stopped and walks to the end.
+ * --pages limits the speed crawl only; the progress crawl resumes where the last run stopped and walks to the end,
+ * once per region in --regions (default US,EU,KR,TW,CN), because the API serves at most 20 pages of any ranking.
  * The zone id is in the raid's Warcraft Logs URL (warcraftlogs.com/zone/rankings/<zoneId>).
  * Without --encounter, every boss in the zone is crawled.
  * "progress" crawls guilds' first kills (cheap: one ranking entry is one first kill) and runs first, for every boss,
@@ -22,6 +23,7 @@ const { values } = parseArgs({
     difficulty: { type: "string", default: "mythic,heroic" },
     pages: { type: "string", default: "2" },
     metrics: { type: "string", default: "progress,speed" },
+    regions: { type: "string", default: "US,EU,KR,TW,CN" },
     reserve: { type: "string", default: "300" },
   },
 });
@@ -44,16 +46,20 @@ async function main() {
   run: for (const metric of values.metrics!.split(",") as RankingMetric[]) {
     for (const encounterId of encounterIds) {
       for (const difficulty of values.difficulty!.split(",") as Difficulty[]) {
-        const { saved, stopped } = await crawlBoss(wcl, {
-          zoneId: Number(values.zone),
-          encounterId,
-          difficulty,
-          metric,
-          pages: Number(values.pages),
-          reservePoints: Number(values.reserve),
-        });
-        console.log(`Encounter ${encounterId} ${difficulty} ${metric}: ${saved} new kills`);
-        if (stopped) break run;
+        // Rankings stop at 20 pages, so progress is crawled region by region to reach more guilds' first kills.
+        for (const region of metric === "progress" ? values.regions!.split(",") : [undefined]) {
+          const { saved, stopped } = await crawlBoss(wcl, {
+            zoneId: Number(values.zone),
+            encounterId,
+            difficulty,
+            metric,
+            region,
+            pages: Number(values.pages),
+            reservePoints: Number(values.reserve),
+          });
+          console.log(`Encounter ${encounterId} ${difficulty} ${metric}${region ? ` ${region}` : ""}: ${saved} new kills`);
+          if (stopped) break run;
+        }
       }
     }
   }

@@ -76,7 +76,7 @@ interface KillMeta {
 /** Fetches healers, phases and cooldown casts for one kill fight. */
 async function buildKillRecord(wcl: WclClient, meta: KillMeta, reportStart: number, fight: BossFight): Promise<KillRecord> {
   const healers = (await fightHealers(wcl, meta.reportCode, fight.id)).filter(
-    (h): h is { name: string; spec: HealerSpec } => isHealerSpec(h.spec),
+    (h): h is { actorId: number; name: string; spec: HealerSpec } => isHealerSpec(h.spec),
   );
   const specByName = new Map(healers.map((h) => [h.name, h.spec]));
   const actors = await reportActors(wcl, meta.reportCode);

@@ -1,0 +1,29 @@
+:root {
+  --bg: #fafaf9;
+  --fg: #1c1917;
+  --muted: #78716c;
+  --line: #e7e5e4;
+  --accent: #15803d;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1917;
+    --fg: #fafaf9;
+    --muted: #a8a29e;
+    --line: #44403c;
+    --accent: #4ade80;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+h1 { margin: 0 0 4px; }
+.muted { color: var(--muted); }
+form { display: grid; gap: 12px; margin: 24px 0; }
+fieldset { border: 1px solid var(--line); border-radius: 8px; display: flex; flex-wrap: wrap; gap: 12px; }
+label { display: flex; gap: 6px; align-items: center; }
+input[type="number"] { width: 5em; }
+button { justify-self: start; padding: 8px 16px; border-radius: 6px; border: 0; background: var(--accent); color: var(--bg); font-weight: 600; cursor: pointer; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+pre { background: var(--line); padding: 12px; border-radius: 8px; overflow-x: auto; }

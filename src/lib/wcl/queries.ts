@@ -156,3 +156,13 @@ export async function reportActors(wcl: WclClient, code: string) {
   );
   return new Map(d.reportData.report.masterData.actors.map((a) => [a.id, a.name]));
 }
+
+/** Boss encounters in a raid zone, in zone order. */
+export async function zoneEncounters(wcl: WclClient, zoneId: number) {
+  const d = await wcl.query<{ worldData: { zone: { name: string; encounters: { id: number; name: string }[] } | null } }>(
+    `query($id: Int!) { worldData { zone(id: $id) { name encounters { id name } } } }`,
+    { id: zoneId },
+  );
+  if (!d.worldData.zone) throw new Error(`Unknown Warcraft Logs zone ${zoneId}`);
+  return d.worldData.zone;
+}

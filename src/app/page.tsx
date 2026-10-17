@@ -109,6 +109,21 @@ function PlanView({ plan }: { plan: Plan }) {
       </table>
       <h2>Note</h2>
       <pre>{toNote(plan.timings)}</pre>
+      <h2>Logs used</h2>
+      <ul>
+        {[...plan.killsUsed]
+          .sort((a, b) => b.weight - a.weight)
+          .slice(0, 15)
+          .map(({ kill }) => (
+            <li key={`${kill.reportCode}-${kill.fightId}`}>
+              <a href={`https://www.warcraftlogs.com/reports/${kill.reportCode}#fight=${kill.fightId}`}>{kill.guildName}</a>{" "}
+              <span className="muted">
+                {kill.killIndex === 1 ? "first kill" : kill.killIndex ? `kill ${kill.killIndex}` : "kill"},{" "}
+                {new Date(kill.killDate).toISOString().slice(0, 10)}
+              </span>
+            </li>
+          ))}
+      </ul>
     </section>
   );
 }

@@ -194,7 +194,7 @@ export async function reportAbilities(wcl: WclClient, code: string) {
   return new Map(d.reportData.report.masterData.abilities.map((a) => [a.gameID, a.name]));
 }
 
-/** Every cast event by the given actors in one fight, following pagination. */
+/** Every cast event by the given actors in one fight, following pagination. Queries one actor at a time with sourceID. */
 export async function actorCasts(
   wcl: WclClient,
   code: string,
@@ -202,21 +202,24 @@ export async function actorCasts(
   actorIds: number[],
 ): Promise<RawCast[]> {
   const out: RawCast[] = [];
-  let start: number | null = fight.startTime;
-  while (start !== null) {
-    const d: { reportData: { report: { events: { data: RawCast[]; nextPageTimestamp: number | null } } } } =
-      await wcl.query(
-        `query($code: String!, $fightIDs: [Int]!, $start: Float!, $end: Float!, $filter: String!) {
-          reportData { report(code: $code) {
-            events(fightIDs: $fightIDs, startTime: $start, endTime: $end, dataType: Casts, filterExpression: $filter) {
-              data nextPageTimestamp
-            }
-          } }
-        }`,
-        { code, fightIDs: [fight.id], start, end: fight.endTime, filter: `source.id in (${actorIds.join(",")})` },
-      );
-    out.push(...d.reportData.report.events.data);
-    start = d.reportData.report.events.nextPageTimestamp;
+  for (const sourceID of actorIds) {
+    let start: number | null = fight.startTime;
+    while (start !== null) {
+      const d: { reportData: { report: { events: { data: RawCast[]; nextPageTimestamp: number | null } } } } =
+        await wcl.query(
+          `query($code: String!, $fightIDs: [Int]!, $start: Float!, $end: Float!, $sourceID: Int!) {
+            reportData { report(code: $code) {
+              events(fightIDs: $fightIDs, startTime: $start, endTime: $end, dataType: Casts, sourceID: $sourceID) {
+                data nextPageTimestamp
+              }
+            } }
+          }`,
+          { code, fightIDs: [fight.id], start, end: fight.endTime, sourceID },
+        );
+      // Some events (begincast, for example) don't carry an ability; keep only real casts.
+      out.push(...d.reportData.report.events.data.filter((e) => e.abilityGameID && (e as { type?: string }).type !== "begincast"));
+      start = d.reportData.report.events.nextPageTimestamp;
+    }
   }
   return out;
 }

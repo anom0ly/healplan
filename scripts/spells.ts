@@ -41,7 +41,8 @@ async function main() {
     const specById = new Map(healers.map((h) => [h.actorId, h.spec]));
     for (const h of healers) healersPerSpec.set(h.spec, (healersPerSpec.get(h.spec) ?? 0) + 1);
     const names = await reportAbilities(wcl, k.reportCode);
-    for (const c of await actorCasts(wcl, k.reportCode, fight, [...specById.keys()])) {
+    const casts = await actorCasts(wcl, k.reportCode, fight, [...specById.keys()]);
+    for (const c of casts) {
       const spec = specById.get(c.sourceID)!;
       const spells = bySpec.get(spec) ?? new Map();
       const s = spells.get(c.abilityGameID) ?? { name: names.get(c.abilityGameID) ?? "?", casts: 0, kills: new Set<string>() };
@@ -50,18 +51,19 @@ async function main() {
       spells.set(c.abilityGameID, s);
       bySpec.set(spec, spells);
     }
-    console.log(`Read ${k.guildName} ${k.reportCode}#${k.fightId}`);
+    console.log(`Read ${k.guildName} ${k.reportCode}#${k.fightId}: ${healers.length} healers, ${casts.length} casts`);
   }
 
+  if (bySpec.size === 0) console.log("No healer casts found in these kills.");
   for (const [spec, spells] of bySpec) {
     const healers = healersPerSpec.get(spec) ?? 1;
-    console.log(`\n${spec} (${healers} healers across ${kills.length} kills)`);
+    console.log(`${spec} (${healers} healers across ${kills.length} kills)`);
     [...spells.entries()]
       .map(([id, s]) => ({ id, ...s, perHealer: s.casts / healers }))
       .filter((s) => s.perHealer <= Number(values["max-per-kill"]))
       .sort((a, b) => b.kills.size - a.kills.size || b.casts - a.casts)
       .slice(0, 25)
-      .forEach((s) => console.log(`  ${s.id}\t${s.name}\t${s.casts} casts, ${s.perHealer.toFixed(1)} per healer, in ${s.kills.size} kills`));
+      .forEach((s) => console.log(`  ${s.id} | ${s.name} | ${s.casts} casts, ${s.perHealer.toFixed(1)} per healer, in ${s.kills.size} kills`));
   }
   await db().end();
 }

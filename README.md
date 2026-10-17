@@ -46,7 +46,7 @@ The app runs as two services in one Railway project, sharing one Postgres databa
    - **Custom Start Command:** `npm run crawl -- --zone <zoneId> --difficulty mythic,heroic --pages 2`
    - **Cron Schedule:** `0 10 * * *` (10:00 UTC daily, after NA raid nights end)
    - The same three variables as the web service
-   - The crawl creates the tables on its first run and exits when done, which Railway's cron jobs require.
+   - The crawl exits when done, which Railway's cron jobs require. Both services create the database tables on start if they're missing.
 6. **Seed data.** Run the crawler once by hand from its service page. The site shows "No matching kills yet" until it has run.
 
 When a new raid tier opens, change `--zone` in the crawler's start command to the new raid's zone id.

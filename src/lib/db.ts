@@ -124,3 +124,47 @@ export async function saveCrawlPage(encounterId: number, difficulty: Difficulty,
     [encounterId, difficulty, metric, nextPage],
   );
 }
+
+export async function saveEncounters(zoneId: number, zoneName: string, encounters: { id: number; name: string }[]) {
+  for (const [i, e] of encounters.entries()) {
+    await db().query(
+      `INSERT INTO encounters (id, zone_id, zone_name, name, position) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO UPDATE SET zone_id = EXCLUDED.zone_id, zone_name = EXCLUDED.zone_name,
+         name = EXCLUDED.name, position = EXCLUDED.position`,
+      [e.id, zoneId, zoneName, e.name, i],
+    );
+  }
+}
+
+export interface BossOption {
+  id: number;
+  name: string;
+  zoneName: string;
+  kills: Record<Difficulty, number>;
+}
+
+/** Saved bosses, newest raid first and in raid order, with how many kills of each difficulty are stored. */
+export async function listBosses(): Promise<BossOption[]> {
+  const r = await db().query(
+    `SELECT e.id, e.name, e.zone_name,
+       count(k.*) FILTER (WHERE k.difficulty = 'mythic')::int AS mythic,
+       count(k.*) FILTER (WHERE k.difficulty = 'heroic')::int AS heroic
+     FROM encounters e LEFT JOIN kills k ON k.encounter_id = e.id
+     GROUP BY e.id ORDER BY max(e.zone_id) DESC, max(e.position)`,
+  );
+  return r.rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    zoneName: row.zone_name,
+    kills: { mythic: row.mythic, heroic: row.heroic },
+  }));
+}
+
+/** How often each spell id appears in stored casts, and in how many kills. */
+export async function castCounts(): Promise<Map<number, { casts: number; kills: number }>> {
+  const r = await db().query(
+    `SELECT spell_id, count(*)::int AS casts, count(DISTINCT (report_code, fight_id))::int AS kills
+     FROM casts GROUP BY spell_id`,
+  );
+  return new Map(r.rows.map((row) => [row.spell_id, { casts: row.casts, kills: row.kills }]));
+}

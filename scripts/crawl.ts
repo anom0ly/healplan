@@ -10,7 +10,7 @@
  */
 import { parseArgs } from "node:util";
 import { crawlBoss } from "@/lib/crawl";
-import { db, migrate } from "@/lib/db";
+import { db, migrate, saveEncounters } from "@/lib/db";
 import type { Difficulty } from "@/lib/types";
 import type { RankingMetric } from "@/lib/wcl/queries";
 import { WclClient } from "@/lib/wcl/client";
@@ -36,12 +36,11 @@ if (!values.zone) {
 async function main() {
   const wcl = new WclClient();
   await migrate();
-  let encounterIds = values.encounter?.split(",").map(Number);
-  if (!encounterIds) {
-    const zone = await zoneEncounters(wcl, Number(values.zone));
-    console.log(`${zone.name}: ${zone.encounters.map((e) => `${e.name} (${e.id})`).join(", ")}`);
-    encounterIds = zone.encounters.map((e) => e.id);
-  }
+  const zone = await zoneEncounters(wcl, Number(values.zone));
+  console.log(`${zone.name}: ${zone.encounters.map((e) => `${e.name} (${e.id})`).join(", ")}`);
+  // Boss names feed the site's boss picker.
+  await saveEncounters(Number(values.zone), zone.name, zone.encounters);
+  const encounterIds = values.encounter?.split(",").map(Number) ?? zone.encounters.map((e) => e.id);
   const before = await wcl.rateLimit();
   run: for (const metric of values.metrics!.split(",") as RankingMetric[]) {
     for (const encounterId of encounterIds) {

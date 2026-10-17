@@ -1,4 +1,4 @@
-import { loadKills } from "@/lib/db";
+import { listBosses, loadKills, type BossOption } from "@/lib/db";
 import { buildPlan, type Plan } from "@/lib/engine/plan";
 import { formatTime, toNote } from "@/lib/engine/note";
 import { parsePlanRequest } from "@/lib/request";
@@ -33,6 +33,8 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
     }
   }
   const val = (k: string) => (typeof params[k] === "string" ? (params[k] as string) : "");
+  // Falls back to typing an encounter id when the boss list can't be read or the crawler hasn't saved it yet.
+  const bosses: BossOption[] = await listBosses().catch(() => []);
 
   return (
     <main>
@@ -42,10 +44,27 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       </p>
 
       <form method="get">
-        <label>
-          Encounter id
-          <input name="encounter" type="number" defaultValue={val("encounter")} required />
-        </label>
+        {bosses.length > 0 ? (
+          <label>
+            Boss
+            <select name="encounter" defaultValue={val("encounter") || String(bosses[0].id)} required>
+              {groupByZone(bosses).map(([zoneName, zoneBosses]) => (
+                <optgroup key={zoneName} label={zoneName}>
+                  {zoneBosses.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({b.kills.mythic.toLocaleString("en-US")} Mythic, {b.kills.heroic.toLocaleString("en-US")} Heroic kills)
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label>
+            Encounter id
+            <input name="encounter" type="number" defaultValue={val("encounter")} required />
+          </label>
+        )}
         <label>
           Difficulty
           <select name="difficulty" defaultValue={val("difficulty") || "mythic"}>
@@ -73,6 +92,12 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       {plan && <PlanView plan={plan} />}
     </main>
   );
+}
+
+function groupByZone(bosses: BossOption[]): [string, BossOption[]][] {
+  const zones = new Map<string, BossOption[]>();
+  for (const b of bosses) zones.set(b.zoneName, [...(zones.get(b.zoneName) ?? []), b]);
+  return [...zones];
 }
 
 function PlanView({ plan }: { plan: Plan }) {

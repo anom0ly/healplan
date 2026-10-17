@@ -49,3 +49,12 @@ CREATE TABLE IF NOT EXISTS crawl_pages (
   updated_at   timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (encounter_id, difficulty, metric)
 );
+
+-- Boss names for the boss picker, saved by the crawler from the raid's Warcraft Logs zone.
+CREATE TABLE IF NOT EXISTS encounters (
+  id        integer PRIMARY KEY,
+  zone_id   integer NOT NULL,
+  zone_name text    NOT NULL,
+  name      text    NOT NULL,
+  position  integer NOT NULL
+);

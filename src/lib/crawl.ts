@@ -182,7 +182,8 @@ export async function crawlBoss(wcl: WclClient, opts: CrawlOptions) {
   };
   for (; resumable || page <= opts.pages; page++) {
     if (await overBudget(wcl, opts.reservePoints, log)) return stop();
-    const { fights, hasMorePages } = await fightRankings(wcl, opts.encounterId, DIFFICULTY_ID[opts.difficulty], page, opts.metric);
+    const { fights, hasMorePages, note } = await fightRankings(wcl, opts.encounterId, DIFFICULTY_ID[opts.difficulty], page, opts.metric);
+    if (note) log(`No ${opts.metric} rankings page ${page} for encounter ${opts.encounterId} ${opts.difficulty}: ${note}`);
     for (const ranked of fights) {
       if (await hasKill(ranked.reportCode, ranked.fightId)) continue;
       if (await overBudget(wcl, opts.reservePoints, log)) return stop();

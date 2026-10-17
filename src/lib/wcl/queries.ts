@@ -10,8 +10,10 @@ export interface RankedFight {
 }
 
 interface FightRankingsJson {
-  hasMorePages: boolean;
-  rankings: {
+  hasMorePages?: boolean;
+  /** Missing when WCL has no page here; the reason, if any, is in `error`. */
+  error?: string;
+  rankings?: {
     duration: number;
     startTime: number;
     guild: { id: number; name: string };
@@ -37,6 +39,10 @@ export async function fightRankings(
     { id: encounterId, difficulty, page, metric },
   );
   const json = d.worldData.encounter.fightRankings;
+  if (!Array.isArray(json?.rankings)) {
+    // Treated as the end of the list; `note` says why so the crawl can log it.
+    return { fights: [], hasMorePages: false, note: json?.error ?? JSON.stringify(json).slice(0, 200) };
+  }
   // Entries without a public report or guild can't be crawled.
   const fights: RankedFight[] = json.rankings.filter((r) => r.report?.code && r.guild?.id).map((r) => ({
     guildId: r.guild.id,
@@ -46,7 +52,7 @@ export async function fightRankings(
     startTime: r.startTime,
     durationMs: r.duration,
   }));
-  return { fights, hasMorePages: json.hasMorePages };
+  return { fights, hasMorePages: json.hasMorePages ?? false, note: undefined };
 }
 
 export interface ReportSummary {

@@ -11,7 +11,7 @@ describe.skipIf(!url)("db round trip", () => {
     process.env.DATABASE_URL = url;
     mod = await import("@/lib/db");
     await mod.migrate();
-    await mod.db().query("TRUNCATE kills, casts, guild_kill_history, crawl_pages");
+    await mod.db().query("TRUNCATE kills, casts, guild_kill_history, crawl_pages, encounters");
   });
 
   afterAll(async () => {
@@ -42,5 +42,16 @@ describe.skipIf(!url)("db round trip", () => {
     await mod.saveCrawlPage(999, "heroic", "progress", 4);
     expect(await mod.getCrawlPage(999, "heroic", "progress")).toBe(4);
     expect(await mod.getCrawlPage(999, "mythic", "progress")).toBeNull();
+  });
+
+  it("lists saved bosses with kill counts, and counts casts per spell", async () => {
+    await mod.saveEncounters(53, "Test Raid", [
+      { id: 998, name: "First Boss" },
+      { id: 999, name: "Second Boss" },
+    ]);
+    const bosses = await mod.listBosses();
+    expect(bosses.map((b) => b.name)).toEqual(["First Boss", "Second Boss"]);
+    expect(bosses[1]).toMatchObject({ zoneName: "Test Raid", kills: { mythic: 1, heroic: 0 } });
+    expect((await mod.castCounts()).get(740)).toEqual({ casts: 1, kills: 1 });
   });
 });

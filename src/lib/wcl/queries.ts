@@ -19,16 +19,26 @@ interface FightRankingsJson {
   }[];
 }
 
-/** Kills on one boss, ranked by speed. Each page holds up to 100 fights. */
-export async function fightRankings(wcl: WclClient, encounterId: number, difficulty: number, page: number) {
+/** "speed" ranks the fastest kills; "progress" ranks guilds' first kills in the order they happened. */
+export type RankingMetric = "speed" | "progress";
+
+/** Kills on one boss, ranked by the metric. Each page holds up to 100 fights. */
+export async function fightRankings(
+  wcl: WclClient,
+  encounterId: number,
+  difficulty: number,
+  page: number,
+  metric: RankingMetric = "speed",
+) {
   const d = await wcl.query<{ worldData: { encounter: { fightRankings: FightRankingsJson } } }>(
-    `query($id: Int!, $difficulty: Int!, $page: Int!) {
-      worldData { encounter(id: $id) { fightRankings(difficulty: $difficulty, metric: speed, page: $page) } }
+    `query($id: Int!, $difficulty: Int!, $page: Int!, $metric: FightRankingMetricType!) {
+      worldData { encounter(id: $id) { fightRankings(difficulty: $difficulty, metric: $metric, page: $page) } }
     }`,
-    { id: encounterId, difficulty, page },
+    { id: encounterId, difficulty, page, metric },
   );
   const json = d.worldData.encounter.fightRankings;
-  const fights: RankedFight[] = json.rankings.map((r) => ({
+  // Entries without a public report or guild can't be crawled.
+  const fights: RankedFight[] = json.rankings.filter((r) => r.report?.code && r.guild?.id).map((r) => ({
     guildId: r.guild.id,
     guildName: r.guild.name,
     reportCode: r.report.code,

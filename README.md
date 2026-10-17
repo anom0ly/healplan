@@ -8,8 +8,8 @@ Mythic and Heroic are both supported.
 
 ## How it works
 
-1. **Nightly crawl** (`npm run crawl`) walks Warcraft Logs speed rankings for each boss. For every new kill it:
-   - works out whether it was the guild's 1st, 2nd, 3rd or later kill by scanning the guild's public reports once (cached in `guild_kill_history`)
+1. **Nightly crawl** (`npm run crawl`) walks two Warcraft Logs rankings for each boss: **progress** (each guild's first kill, the same data as the Progress tab on the site) and then **speed** (the fastest recent kills). For every new kill it:
+   - for speed-ranked kills, works out whether it was the guild's 1st, 2nd, 3rd or later kill by scanning the guild's public reports once (cached in `guild_kill_history`)
    - stores the healer lineup, phase start times, and casts of every cooldown in [`src/data/cooldowns.ts`](src/data/cooldowns.ts)
 2. **Planning** ([`src/lib/engine`](src/lib/engine)) runs per request from the database, never against the live API:
    - **Weighting:** first kill 1.0, kills 2 to 3 get 0.6, farm kills 0.25. Recency halves every 14 days. Kills far from the median length are halved. Comp similarity (multiset Jaccard) multiplies in, and kills under 0.6 are dropped.
@@ -45,7 +45,7 @@ The app runs as two services in one Railway project, sharing one Postgres databa
    - `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET` from your Warcraft Logs API client
 4. **Expose the site.** In the web service, open **Settings → Networking → Generate Domain**. Set the healthcheck path to `/api/health`.
 5. **Add the nightly crawler.** Choose **+ New → GitHub Repo**, pick `anom0ly/healplan` again, and name the service `crawler`. In its settings:
-   - **Custom Start Command:** `npm run crawl -- --zone <zoneId> --difficulty mythic,heroic --pages 2`
+   - **Custom Start Command:** `npm run crawl -- --zone <zoneId> --difficulty mythic,heroic --pages 2`. Each run first walks every boss's **progress** rankings (each guild's first kill, in the order guilds got them), then the **speed** rankings for recent kills.
    - **Cron Schedule:** `0 10 * * *` (10:00 UTC daily, after NA raid nights end)
    - The same three variables as the web service
    - The crawl exits when done, which Railway's cron jobs require. Both services create the database tables on start if they're missing.

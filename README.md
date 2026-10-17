@@ -45,7 +45,7 @@ The app runs as two services in one Railway project, sharing one Postgres databa
    - `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET` from your Warcraft Logs API client
 4. **Expose the site.** In the web service, open **Settings → Networking → Generate Domain**. Set the healthcheck path to `/api/health`.
 5. **Add the nightly crawler.** Choose **+ New → GitHub Repo**, pick `anom0ly/healplan` again, and name the service `crawler`. In its settings:
-   - **Custom Start Command:** `npm run crawl -- --zone <zoneId> --difficulty mythic,heroic --pages 2`. Each run first walks every boss's **progress** rankings (each guild's first kill, in the order guilds got them), carrying on from the page the last run reached until it has them all, then the first `--pages` pages of **speed** rankings for recent kills.
+   - **Custom Start Command:** `npm run crawl -- --zone <zoneId> --difficulty mythic,heroic --pages 2`. Each run first walks every boss's **progress** rankings (each guild's first kill, in the order guilds got them), carrying on from the page the last run reached until it has them all, once per region (US, EU, KR, TW, CN) because the API serves at most 20 pages (2,000 kills) of any ranking, then the first `--pages` pages of **speed** rankings for recent kills.
    - **Cron Schedule:** `0 10 * * *` (10:00 UTC daily, after NA raid nights end)
    - The same three variables as the web service
    - The crawl exits when done, which Railway's cron jobs require. Both services create the database tables on start if they're missing.

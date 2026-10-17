@@ -1,5 +1,13 @@
 import { COOLDOWNS } from "@/data/cooldowns";
-import { getGuildKillHistory, hasKill, saveGuildKillHistory, saveKill, type GuildKillHistory } from "./db";
+import {
+  getCrawlPage,
+  getGuildKillHistory,
+  hasKill,
+  saveCrawlPage,
+  saveGuildKillHistory,
+  saveKill,
+  type GuildKillHistory,
+} from "./db";
 import { HEALER_SPECS, DIFFICULTY_ID, type Difficulty, type HealerSpec, type KillRecord } from "./types";
 import type { WclClient } from "./wcl/client";
 import {
@@ -142,26 +150,42 @@ export interface CrawlOptions {
   difficulty: Difficulty;
   /** "progress" walks guilds' first kills in the order they happened; "speed" walks the fastest kills. */
   metric: RankingMetric;
-  /** Pages of rankings to walk, 100 kills each. */
+  /** Pages of speed rankings to walk, 100 kills each. Progress rankings are always walked to the end. */
   pages: number;
   /** Stop when this many points are left in the hour, to leave room for on-demand imports. */
   reservePoints: number;
   log?: (msg: string) => void;
 }
 
-/** Crawls new kills of one boss into the database. Safe to re-run: known kills are skipped. */
+/** True when the hour's remaining Warcraft Logs points have dropped to the reserve, after logging it. */
+export async function overBudget(wcl: WclClient, reservePoints: number, log: (msg: string) => void = console.log) {
+  const rl = await wcl.rateLimit();
+  if (rl.limitPerHour - rl.pointsSpentThisHour >= reservePoints) return false;
+  log(`Stopping: ${rl.pointsSpentThisHour}/${rl.limitPerHour} Warcraft Logs points used this hour`);
+  return true;
+}
+
+/**
+ * Crawls new kills of one boss into the database. Safe to re-run: known kills are skipped.
+ * Progress rankings only grow at the end, so that crawl resumes from the page the last run reached and walks to the end;
+ * speed rankings are re-read from the top, `pages` deep. Checks the hour's API points before every Warcraft Logs
+ * request batch and returns `stopped: true` once only the reserve is left, so the caller can end the run.
+ */
 export async function crawlBoss(wcl: WclClient, opts: CrawlOptions) {
   const log = opts.log ?? console.log;
+  const resumable = opts.metric === "progress";
   let saved = 0;
-  for (let page = 1; page <= opts.pages; page++) {
+  let page = resumable ? ((await getCrawlPage(opts.encounterId, opts.difficulty, opts.metric)) ?? 1) : 1;
+  const stop = async () => {
+    if (resumable) await saveCrawlPage(opts.encounterId, opts.difficulty, opts.metric, page);
+    return { saved, stopped: true };
+  };
+  for (; resumable || page <= opts.pages; page++) {
+    if (await overBudget(wcl, opts.reservePoints, log)) return stop();
     const { fights, hasMorePages } = await fightRankings(wcl, opts.encounterId, DIFFICULTY_ID[opts.difficulty], page, opts.metric);
     for (const ranked of fights) {
       if (await hasKill(ranked.reportCode, ranked.fightId)) continue;
-      const rl = await wcl.rateLimit();
-      if (rl.limitPerHour - rl.pointsSpentThisHour < opts.reservePoints) {
-        log(`Stopping: ${rl.pointsSpentThisHour}/${rl.limitPerHour} points used this hour`);
-        return saved;
-      }
+      if (await overBudget(wcl, opts.reservePoints, log)) return stop();
       try {
         const kill = await crawlFight(wcl, ranked, opts.zoneId, opts.encounterId, opts.difficulty, opts.metric);
         if (kill) {
@@ -173,8 +197,9 @@ export async function crawlBoss(wcl: WclClient, opts: CrawlOptions) {
         log(`Skipped ${ranked.reportCode}#${ranked.fightId}: ${(e as Error).message}`);
       }
     }
+    // The last page can still fill up, so the next run starts by re-reading it.
+    if (resumable) await saveCrawlPage(opts.encounterId, opts.difficulty, opts.metric, hasMorePages ? page + 1 : page);
     if (!hasMorePages) break;
   }
-  return saved;
+  return { saved, stopped: false };
 }
-

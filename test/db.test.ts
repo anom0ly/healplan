@@ -11,7 +11,7 @@ describe.skipIf(!url)("db round trip", () => {
     process.env.DATABASE_URL = url;
     mod = await import("@/lib/db");
     await mod.migrate();
-    await mod.db().query("TRUNCATE kills, casts, guild_kill_history");
+    await mod.db().query("TRUNCATE kills, casts, guild_kill_history, crawl_pages");
   });
 
   afterAll(async () => {
@@ -34,5 +34,13 @@ describe.skipIf(!url)("db round trip", () => {
     await mod.saveGuildKillHistory(1, 999, "heroic", h);
     expect(await mod.getGuildKillHistory(1, 999, "heroic")).toEqual(h);
     expect(await mod.getGuildKillHistory(1, 999, "mythic")).toBeNull();
+  });
+
+  it("remembers where a resumable crawl got to", async () => {
+    expect(await mod.getCrawlPage(999, "heroic", "progress")).toBeNull();
+    await mod.saveCrawlPage(999, "heroic", "progress", 3);
+    await mod.saveCrawlPage(999, "heroic", "progress", 4);
+    expect(await mod.getCrawlPage(999, "heroic", "progress")).toBe(4);
+    expect(await mod.getCrawlPage(999, "mythic", "progress")).toBeNull();
   });
 });

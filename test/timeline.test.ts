@@ -34,21 +34,35 @@ describe("buildTimeline", () => {
   it("lays phases end to end across the fight", () => {
     expect(timeline.totalMs).toBe(300_000);
     expect(timeline.phases).toEqual([
-      { id: 1, leftPct: 0, widthPct: 40, lengthMs: 120_000 },
-      { id: 2, leftPct: 40, widthPct: 60, lengthMs: 180_000 },
+      { id: 1, startMs: 0, lengthMs: 120_000, leftPct: 0, widthPct: 40 },
+      { id: 2, startMs: 120_000, lengthMs: 180_000, leftPct: 40, widthPct: 60 },
     ]);
   });
 
-  it("places each cooldown press at its fight position, with its spread around it", () => {
+  it("cuts each phase into slices and counts the share of kills pressing in each", () => {
     const row = timeline.groups.flatMap((g) => g.rows).find((r) => r.spellId === TRANQ)!;
     expect(row.spellName).toBe("Tranquility");
-    expect(row.marks).toHaveLength(1);
-    const [mark] = row.marks;
-    expect(mark.phaseId).toBe(2);
-    expect(mark.atPct).toBeCloseTo(43.3, 0); // 130s of a 300s fight
-    expect(mark.fromPct).toBeLessThanOrEqual(mark.atPct);
-    expect(mark.toPct).toBeGreaterThanOrEqual(mark.atPct);
-    expect(mark.killCount).toBe(3);
+    expect(timeline.bucketMs).toBe(4_000);
+    expect(row.phases.map((slices) => slices.length)).toEqual([30, 45]);
+    // Presses 8s, 10s and 12s into phase 2: two land in the 8–12s slice, one in 12–16s.
+    expect(row.phases[1][2]).toEqual({ startMs: 8_000, endMs: 12_000, share: expect.closeTo(2 / 3, 5), kills: 2 });
+    expect(row.phases[1][3]).toMatchObject({ share: expect.closeTo(1 / 3, 5), kills: 1 });
+    expect(row.phases[0].every((s) => s.share === 0)).toBe(true);
+    expect(row.common).toEqual([{ phaseId: 2, tPhaseMs: 10_000 }]);
+    expect(timeline.all[1][2].perKill).toBeCloseTo(2 / 3, 5);
+  });
+
+  it("counts a kill once per slice and judges a phase only against kills that reached it", () => {
+    const kills = [
+      kill({ casts: [cast(TRANQ, 1_000), cast(TRANQ, 2_000)] }),
+      kill({ phases: [], casts: [cast(TRANQ, 1_500)] }),
+      kill({ casts: [cast(TRANQ, 130_000)] }),
+    ];
+    const t = buildTimeline(buildPlan(kills, kills[0].healers, { weight: { now: NOW } }), 8_000);
+    const row = t.groups.flatMap((g) => g.rows).find((r) => r.spellId === TRANQ)!;
+    expect(row.phases[0][0]).toMatchObject({ share: expect.closeTo(2 / 3, 5), kills: 2 });
+    // Only two of the three kills reached phase 2, so one press there is half of them.
+    expect(row.phases[1][1]).toMatchObject({ share: expect.closeTo(1 / 2, 5), kills: 1 });
   });
 
   it("groups cooldowns by the healer spec or class that casts them", () => {

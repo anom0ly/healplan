@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
+import { summarizeComps, type CompSummary } from "./engine/comp";
 import type { Difficulty, HealerSpec, KillRecord } from "./types";
 
 let pool: pg.Pool | null = null;
@@ -158,6 +159,16 @@ export async function listBosses(): Promise<BossOption[]> {
     zoneName: row.zone_name,
     kills: { mythic: row.mythic, heroic: row.heroic },
   }));
+}
+
+/** Every healer lineup stored for this boss, most-used first. */
+export async function listComps(encounterId: number, difficulty: Difficulty): Promise<CompSummary[]> {
+  const r = await db().query(
+    `SELECT healers, count(*)::int AS kills, count(*) FILTER (WHERE kill_index = 1)::int AS first_kills
+     FROM kills WHERE encounter_id = $1 AND difficulty = $2 GROUP BY healers`,
+    [encounterId, difficulty],
+  );
+  return summarizeComps(r.rows.map((row) => ({ healers: row.healers, kills: row.kills, firstKills: row.first_kills })));
 }
 
 /** How often each spell id appears in stored casts, and in how many kills. */

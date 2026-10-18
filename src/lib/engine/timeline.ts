@@ -17,11 +17,23 @@ export interface TimelinePhase {
 export interface HeatSlice {
   startMs: number;
   endMs: number;
-  /** Share of the kill weight that reached this phase and pressed the cooldown in this slice, in [0, 1]. */
+  /**
+   * Share of the kill weight that reached this phase and pressed the cooldown in or near this slice, in [0, 1].
+   * Zero when under the floor.
+   */
   share: number;
-  /** Kills that pressed it in this slice. */
+  /** Kills that pressed it in or near this slice. */
   kills: number;
 }
+
+export interface HeatOptions {
+  /** Slices where fewer than this share of kills pressed the cooldown stay blank, so stray presses don't tint the row. */
+  floor: number;
+  /** Presses this close to a slice count toward it too, so one press spread over a few seconds reads as one hot spot. */
+  nearMs: number;
+}
+
+export const DEFAULT_HEAT_OPTIONS: HeatOptions = { floor: 0.1, nearMs: 4_000 };
 
 export interface TimelineRow {
   spellId: number;
@@ -94,7 +106,9 @@ const sliceBounds = (lengthMs: number, bucketMs: number) => {
  * length, and counts for every cooldown in the comp how much of the kill
  * weight pressed it in each slice of each phase.
  */
-export function buildTimeline(plan: Plan, bucketMs = 4_000): Timeline {
+export function buildTimeline(plan: Plan, bucketMs = 4_000, opts: Partial<HeatOptions> = {}): Timeline {
+  const { floor, nearMs } = { ...DEFAULT_HEAT_OPTIONS, ...opts };
+  const reach = Math.floor(nearMs / bucketMs);
   const kills = plan.killsUsed;
   const lengths = phaseLengths(kills.map((w) => w.kill));
   if (lengths.length === 0) lengths.push({ id: 1, lengthMs: bucketMs });
@@ -143,9 +157,14 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000): Timeline {
       spellName: cd?.name ?? `Spell ${spellId}`,
       spec: cd?.spec ?? null,
       phases: perPhase.map((slices, pi) =>
-        slices.map((byKill, si) => {
+        slices.map((_, si) => {
+          const byKill = new Map<string, number>();
+          for (let k = Math.max(0, si - reach); k <= Math.min(slices.length - 1, si + reach); k++) {
+            for (const [key, weight] of slices[k]) byKill.set(key, weight);
+          }
           const w = [...byKill.values()].reduce((a, b) => a + b, 0);
-          return { ...bounds[pi][si], share: reached[pi] > 0 ? Math.min(1, w / reached[pi]) : 0, kills: byKill.size };
+          const share = reached[pi] > 0 ? Math.min(1, w / reached[pi]) : 0;
+          return share < floor ? { ...bounds[pi][si], share: 0, kills: 0 } : { ...bounds[pi][si], share, kills: byKill.size };
         }),
       ),
       common: plan.timings.filter((t) => t.spellId === spellId).map((t) => ({ phaseId: t.phaseId, tPhaseMs: t.tPhaseMs })),

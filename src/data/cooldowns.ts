@@ -21,13 +21,13 @@ export interface Cooldown {
 export const COOLDOWNS: Cooldown[] = [
   // Restoration Druid
   { spellId: 740, name: "Tranquility", spec: "RestorationDruid", kind: "healing", baseCooldownSec: 180, verified: true },
-  { spellId: 33891, name: "Incarnation: Tree of Life", spec: "RestorationDruid", kind: "throughput", baseCooldownSec: 180, verified: false },
+  { spellId: 33891, name: "Incarnation: Tree of Life", spec: "RestorationDruid", kind: "throughput", baseCooldownSec: 180, verified: true },
   { spellId: 391528, name: "Convoke the Spirits", spec: "RestorationDruid", kind: "throughput", baseCooldownSec: 120, verified: true },
   // Holy Paladin
   { spellId: 31821, name: "Aura Mastery", spec: "HolyPaladin", kind: "damage-reduction", baseCooldownSec: 180, verified: true },
   { spellId: 31884, name: "Avenging Wrath", spec: "HolyPaladin", kind: "throughput", baseCooldownSec: 120, verified: true },
   // Discipline Priest
-  { spellId: 62618, name: "Power Word: Barrier", spec: "DisciplinePriest", kind: "damage-reduction", baseCooldownSec: 180, verified: false },
+  { spellId: 62618, name: "Power Word: Barrier", spec: "DisciplinePriest", kind: "damage-reduction", baseCooldownSec: 180, verified: true },
   { spellId: 246287, name: "Evangelism", spec: "DisciplinePriest", kind: "healing", baseCooldownSec: 90, verified: false },
   { spellId: 47536, name: "Rapture", spec: "DisciplinePriest", kind: "healing", baseCooldownSec: 90, verified: false },
   // Holy Priest

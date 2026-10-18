@@ -1,12 +1,12 @@
 /**
  * Lists what each healer spec actually casts in a few stored kills, to find the right spell ids for
  * src/data/cooldowns.ts. Usage:
- *   npm run spells -- --encounter <encounterId> [--difficulty mythic] [--kills 5]
+ *   npm run spells -- --encounter <encounterId> [--difficulty mythic] [--kills 5] [--spec DisciplinePriest]
  * Only spells cast a few times per kill are listed, since cooldowns are cast rarely and fillers often.
  */
 import { parseArgs } from "node:util";
 import { db, loadKills } from "@/lib/db";
-import type { Difficulty } from "@/lib/types";
+import type { Difficulty, HealerSpec } from "@/lib/types";
 import { WclClient } from "@/lib/wcl/client";
 import { actorCasts, fightHealers, reportAbilities, reportPulls } from "@/lib/wcl/queries";
 import { DIFFICULTY_ID } from "@/lib/types";
@@ -17,6 +17,8 @@ const { values } = parseArgs({
     difficulty: { type: "string", default: "mythic" },
     kills: { type: "string", default: "5" },
     "max-per-kill": { type: "string", default: "6" },
+    // Only kills with this healer spec, and only its spells, e.g. DisciplinePriest.
+    spec: { type: "string" },
   },
 });
 
@@ -28,7 +30,10 @@ if (!values.encounter) {
 async function main() {
   const wcl = new WclClient();
   const difficulty = values.difficulty as Difficulty;
-  const kills = (await loadKills(Number(values.encounter), difficulty)).slice(0, Number(values.kills));
+  const spec = values.spec as HealerSpec | undefined;
+  const kills = (await loadKills(Number(values.encounter), difficulty))
+    .filter((k) => !spec || k.healers.includes(spec))
+    .slice(0, Number(values.kills));
   // spec -> spell id -> totals
   const bySpec = new Map<string, Map<number, { name: string; casts: number; kills: Set<string> }>>();
   const healersPerSpec = new Map<string, number>();
@@ -37,7 +42,7 @@ async function main() {
     const { fights } = await reportPulls(wcl, k.reportCode, k.encounterId, DIFFICULTY_ID[difficulty]);
     const fight = fights.find((f) => f.id === k.fightId);
     if (!fight) continue;
-    const healers = await fightHealers(wcl, k.reportCode, k.fightId);
+    const healers = (await fightHealers(wcl, k.reportCode, k.fightId)).filter((h) => !spec || h.spec === spec);
     const specById = new Map(healers.map((h) => [h.actorId, h.spec]));
     for (const h of healers) healersPerSpec.set(h.spec, (healersPerSpec.get(h.spec) ?? 0) + 1);
     const names = await reportAbilities(wcl, k.reportCode);

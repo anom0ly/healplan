@@ -66,6 +66,7 @@ The free Warcraft Logs API tier allows 3,600 points an hour. The crawler checks 
 - [x] Boss picker (filled from crawled bosses, with kill counts)
 - [x] Cooldown timeline, grouped by healer spec and class
 - [x] Heat-map timeline: per-slice press frequency, phase lines, hover details on desktop, phase tabs and tap details on phones
+- [x] Heat-map shading: 10% floor for stray presses, nearby presses count toward each slice, each row shaded against its own busiest moment; one-phase bosses show the whole fight (two-minute parts on phones)
 - [ ] Spec picker polish, damage overlay
 - [ ] Your pulls compared with the plan, auto-assign, share links
 

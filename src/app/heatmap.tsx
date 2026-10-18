@@ -4,7 +4,7 @@ import { useState } from "react";
 import { formatTime } from "@/lib/engine/note";
 import type { HeatSlice, Timeline, TimelinePhase, TimelineRow } from "@/lib/engine/timeline";
 
-/** Heat level 0 to 4 for a share of kills; fixed steps so the same shade means the same share everywhere. */
+/** Heat level 0 to 4 for a value in [0, 1], such as a slice's share against its row's busiest slice. */
 const level = (share: number) => (share <= 0 ? 0 : share < 0.15 ? 1 : share < 0.35 ? 2 : share < 0.6 ? 3 : 4);
 const RARE = 0.15;
 
@@ -14,12 +14,13 @@ const phaseRange = (p: TimelinePhase, s: { startMs: number; endMs: number }) =>
   `P${p.id} +${formatTime(s.startMs)}–${formatTime(s.endMs)}`;
 
 /** The plan's consensus press nearest this slice, in the same phase. */
-function mostCommon(row: TimelineRow, p: TimelinePhase, s: HeatSlice): string | null {
+function mostCommon(row: TimelineRow, p: TimelinePhase, s: HeatSlice, single: boolean): string | null {
   const mid = (s.startMs + s.endMs) / 2;
   const near = row.common
     .filter((c) => c.phaseId === p.id)
     .sort((a, b) => Math.abs(a.tPhaseMs - mid) - Math.abs(b.tPhaseMs - mid))[0];
-  return near ? `${formatTime(p.startMs + near.tPhaseMs)} · P${p.id} +${formatTime(near.tPhaseMs)}` : null;
+  if (!near) return null;
+  return single ? formatTime(near.tPhaseMs) : `${formatTime(p.startMs + near.tPhaseMs)} · P${p.id} +${formatTime(near.tPhaseMs)}`;
 }
 
 function ticks(totalMs: number, fromMs = 0) {
@@ -29,22 +30,30 @@ function ticks(totalMs: number, fromMs = 0) {
   return out.map((t) => ({ t, pct: (t / totalMs) * 100, label: formatTime(fromMs + t) }));
 }
 
-function Legend({ hint }: { hint: string }) {
+function Legend({ hint, phased }: { hint: string; phased: boolean }) {
   return (
     <div className="hm-legend">
-      <span>Rarely pressed</span>
+      <span>Less often</span>
       <span className="hm-swatches" aria-hidden="true">
         {[0, 1, 2, 3, 4].map((l) => (
           <span key={l} className={`hm-l${l}`} />
         ))}
       </span>
-      <span>Most kills press here</span>
-      <span className="hm-legend-phase">
-        <span className="hm-dotted" aria-hidden="true" /> Phase change
-      </span>
+      <span>Busiest time for that cooldown</span>
+      {phased && (
+        <span className="hm-legend-phase">
+          <span className="hm-dotted" aria-hidden="true" /> Phase change
+        </span>
+      )}
       <span className="hm-hint">{hint}</span>
     </div>
   );
+}
+
+/** Shades each row against its own busiest slice, so every cooldown shows where it's mostly pressed. */
+function rowShade(row: TimelineRow) {
+  const max = Math.max(...row.phases.flat().map((s) => s.share), 0.0001);
+  return (share: number) => level(share / max);
 }
 
 export function Heatmap({ desktop, phone }: { desktop: Timeline; phone: Timeline }) {
@@ -61,6 +70,8 @@ type Hover = { key: string; pi: number; si: number } | null;
 function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
   const [hover, setHover] = useState<Hover>(null);
   const { phases, totalMs } = timeline;
+  // A boss with no phase changes reads as one fight, with no phase labels.
+  const single = phases.length === 1;
   const maxAll = Math.max(...timeline.all.flat().map((s) => s.perKill), 0.0001);
 
   const tipStyle = (pi: number, s: { startMs: number; endMs: number }) => {
@@ -93,14 +104,14 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
 
   return (
     <div className="hm-desktop">
-      <Legend hint="Hover a slice for times and how often it's pressed" />
+      <Legend hint="Hover a slice for times and how often it's pressed" phased={!single} />
       <div className="hm-card">
         <div className="hm-row hm-head">
           <div />
           <div className="hm-track hm-phase-names">
             {phases.map((p, pi) => (
               <div key={p.id} className={pi > 0 ? "hm-phase-break" : ""} style={{ left: `${p.leftPct}%`, width: `${p.widthPct}%` }}>
-                <strong>Phase {p.id}</strong>
+                <strong>{single ? "Whole fight" : `Phase ${p.id}`}</strong>
                 <span className="muted">
                   {formatTime(p.startMs)}–{formatTime(p.startMs + p.lengthMs)}
                 </span>
@@ -125,9 +136,11 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
                   <div>
                     <span className="hm-mono">{fightRange(phases[h.pi], s)}</span> into the fight
                   </div>
-                  <div>
-                    <span className="hm-mono">{phaseRange(phases[h.pi], s)}</span> since the phase change
-                  </div>
+                  {!single && (
+                    <div>
+                      <span className="hm-mono">{phaseRange(phases[h.pi], s)}</span> since the phase change
+                    </div>
+                  )}
                   <div className="hm-tip-rule">
                     About <strong>{s.perKill.toFixed(1)}</strong> cooldowns pressed per kill in this slice
                   </div>
@@ -154,13 +167,14 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
                 <div key={row.spellId} className="hm-row">
                   <div className="hm-label">{row.spellName}</div>
                   <div className="hm-track" onMouseLeave={() => setHover(null)}>
-                    {strip(key, row.phases.map((slices) => slices.map((s) => ({ level: level(s.share) }))))}
+                    {strip(key, row.phases.map((slices) => slices.map((s) => ({ level: rowShade(row)(s.share) }))))}
                     {h && (
                       <SliceTip
                         row={row}
                         phase={phases[h.pi]}
                         slice={row.phases[h.pi][h.si]}
                         killCount={timeline.killCount}
+                        single={single}
                         style={tipStyle(h.pi, row.phases[h.pi][h.si])}
                       />
                     )}
@@ -186,20 +200,22 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
   );
 }
 
-function SliceTip(props: { row: TimelineRow; phase: TimelinePhase; slice: HeatSlice; killCount: number; style: React.CSSProperties }) {
+function SliceTip(props: { row: TimelineRow; phase: TimelinePhase; slice: HeatSlice; killCount: number; single: boolean; style: React.CSSProperties }) {
   const { row, phase, slice } = props;
-  const common = mostCommon(row, phase, slice);
+  const common = mostCommon(row, phase, slice, props.single);
   return (
     <div className="hm-tip" style={props.style}>
       <div className="hm-tip-title">{row.spellName}</div>
       <div>
         <span className="hm-mono">{fightRange(phase, slice)}</span> into the fight
       </div>
-      <div>
-        <span className="hm-mono">{phaseRange(phase, slice)}</span> since the phase change
-      </div>
+      {!props.single && (
+        <div>
+          <span className="hm-mono">{phaseRange(phase, slice)}</span> since the phase change
+        </div>
+      )}
       <div className="hm-tip-rule">
-        Pressed here in <strong>{Math.round(slice.share * 100)}%</strong> of kills{" "}
+        Pressed around here in <strong>{Math.round(slice.share * 100)}%</strong> of kills{" "}
         <span className="hm-tip-muted">
           ({slice.kills} of {props.killCount})
         </span>
@@ -213,12 +229,39 @@ function SliceTip(props: { row: TimelineRow; phase: TimelinePhase; slice: HeatSl
   );
 }
 
+/** One tab on phones: a phase, or for a boss with no phases, a two-minute stretch of the fight. */
+interface PhoneView {
+  label: string;
+  pi: number;
+  fromMs: number;
+  toMs: number;
+}
+
+const CHUNK_MS = 120_000;
+
+function phoneViews(phases: TimelinePhase[]): PhoneView[] {
+  if (phases.length > 1) return phases.map((p, pi) => ({ label: `Phase ${p.id}`, pi, fromMs: 0, toMs: p.lengthMs }));
+  // A leftover under half a chunk joins the last tab.
+  const len = phases[0].lengthMs;
+  const count = Math.max(1, Math.round(len / CHUNK_MS));
+  return Array.from({ length: count }, (_, i) => ({
+    label: count === 1 ? "Whole fight" : `Part ${i + 1}`,
+    pi: 0,
+    fromMs: i * CHUNK_MS,
+    toMs: i === count - 1 ? len : (i + 1) * CHUNK_MS,
+  }));
+}
+
 function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
   const { phases, totalMs } = timeline;
-  const [pi, setPi] = useState(0);
+  const views = phoneViews(phases);
+  const [vi, setVi] = useState(0);
   const [spec, setSpec] = useState<string | null>(null);
   const [picked, setPicked] = useState<{ spellId: number; si: number } | null>(null);
-  const phase = phases[pi];
+  const view = views[vi];
+  const phase = phases[view.pi];
+  const single = phases.length === 1;
+  const inView = (s: { startMs: number }) => s.startMs >= view.fromMs && s.startMs < view.toMs;
   const maxAll = Math.max(...timeline.all.flat().map((s) => s.perKill), 0.0001);
   const healerGroups = timeline.groups.filter((g) => g.count > 0);
   const shown = timeline.groups.filter((g) => g.count === 0 || spec === null || g.label === spec);
@@ -227,44 +270,54 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
 
   return (
     <div className={`hm-phone${pickedRow ? " hm-sheet-open" : ""}`}>
-      <div className="hm-tabs" role="tablist" aria-label="Phase">
-        {phases.map((p, i) => (
-          <button
-            key={p.id}
-            type="button"
-            role="tab"
-            aria-selected={i === pi}
-            className={i === pi ? "hm-tab-on" : ""}
-            onClick={() => {
-              setPi(i);
-              setPicked(null);
-            }}
-          >
-            <strong>Phase {p.id}</strong>
-            <span className="hm-mono">
-              {formatTime(p.startMs)}–{formatTime(p.startMs + p.lengthMs)}
-            </span>
-          </button>
-        ))}
-      </div>
+      {views.length > 1 && (
+        <>
+          <div className="hm-tabs" role="tablist" aria-label={single ? "Part of the fight" : "Phase"}>
+            {views.map((v, i) => (
+              <button
+                key={i}
+                type="button"
+                role="tab"
+                aria-selected={i === vi}
+                className={i === vi ? "hm-tab-on" : ""}
+                onClick={() => {
+                  setVi(i);
+                  setPicked(null);
+                }}
+              >
+                <strong>{v.label}</strong>
+                <span className="hm-mono">
+                  {formatTime(phases[v.pi].startMs + v.fromMs)}–{formatTime(phases[v.pi].startMs + v.toMs)}
+                </span>
+              </button>
+            ))}
+          </div>
 
-      <div className="hm-overview">
-        <div className="hm-overview-strip" aria-hidden="true">
-          {phases.map((p, i) => (
-            <div key={p.id} className={`hm-phase${i > 0 ? " hm-phase-break" : ""}`} style={{ width: `${p.widthPct}%` }}>
-              {timeline.all[i].map((s, si) => (
-                <div key={si} className={`hm-cell hm-l${level(s.perKill / maxAll)}`} style={{ flexGrow: s.endMs - s.startMs }} />
+          <div className="hm-overview">
+            <div className="hm-overview-strip" aria-hidden="true">
+              {phases.map((p, i) => (
+                <div key={p.id} className={`hm-phase${i > 0 ? " hm-phase-break" : ""}`} style={{ width: `${p.widthPct}%` }}>
+                  {timeline.all[i].map((s, si) => (
+                    <div key={si} className={`hm-cell hm-l${level(s.perKill / maxAll)}`} style={{ flexGrow: s.endMs - s.startMs }} />
+                  ))}
+                </div>
               ))}
+              <div
+                className="hm-window"
+                style={{
+                  left: `${((phase.startMs + view.fromMs) / totalMs) * 100}%`,
+                  width: `${((view.toMs - view.fromMs) / totalMs) * 100}%`,
+                }}
+              />
             </div>
-          ))}
-          <div className="hm-window" style={{ left: `${phase.leftPct}%`, width: `${phase.widthPct}%` }} />
-        </div>
-        <div className="hm-overview-labels hm-mono">
-          <span>0:00</span>
-          <span>Whole fight</span>
-          <span>{formatTime(totalMs)}</span>
-        </div>
-      </div>
+            <div className="hm-overview-labels hm-mono">
+              <span>0:00</span>
+              <span>Whole fight</span>
+              <span>{formatTime(totalMs)}</span>
+            </div>
+          </div>
+        </>
+      )}
 
       {healerGroups.length > 1 && (
         <div className="hm-chips">
@@ -287,13 +340,13 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
 
       <div className="hm-card">
         <div className="hm-phone-axis hm-mono">
-          {ticks(phase.lengthMs).map((t) => (
+          {ticks(view.toMs - view.fromMs, view.fromMs).map((t) => (
             <span key={t.t} style={{ left: `${t.pct}%` }} className={t.pct === 0 ? "hm-first" : t.pct > 90 ? "hm-last" : ""}>
               {t.label}
             </span>
           ))}
         </div>
-        <div className="muted hm-small">Time since phase {phase.id} started</div>
+        <div className="muted hm-small">{single ? "Fight time" : `Time since phase ${phase.id} started`}</div>
         {shown.map((g, gi) => (
           <div key={g.label} className={gi > 0 && g.count === 0 && shown[gi - 1].count > 0 ? "hm-raid-start" : ""}>
             <div className="hm-group">
@@ -302,22 +355,24 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
               <span className="muted hm-kind">{g.count > 0 ? "healer" : "raid CD"}</span>
             </div>
             {g.rows.map((row) => {
-              const slices = row.phases[pi];
+              const slices = row.phases[view.pi].map((s, si) => ({ ...s, si })).filter(inView);
               return (
                 <div key={row.spellId} className="hm-phone-row">
                   <div className="hm-phone-name">
                     <span>{row.spellName}</span>
-                    {Math.max(...slices.map((s) => s.share)) < RARE && <span className="muted hm-small">Rarely used this phase</span>}
+                    {Math.max(...slices.map((s) => s.share)) < RARE && (
+                      <span className="muted hm-small">{single ? "Rarely used here" : "Rarely used this phase"}</span>
+                    )}
                   </div>
                   <div className="hm-phone-strip">
-                    {slices.map((s, si) => (
+                    {slices.map((s) => (
                       <button
-                        key={si}
+                        key={s.si}
                         type="button"
-                        className={`hm-l${level(s.share)}${picked?.spellId === row.spellId && picked.si === si ? " hm-on" : ""}`}
+                        className={`hm-l${rowShade(row)(s.share)}${picked?.spellId === row.spellId && picked.si === s.si ? " hm-on" : ""}`}
                         style={{ flexGrow: s.endMs - s.startMs }}
-                        aria-label={`${row.spellName}, ${formatTime(s.startMs)} into phase ${phase.id}, ${Math.round(s.share * 100)}% of kills`}
-                        onClick={() => setPicked({ spellId: row.spellId, si })}
+                        aria-label={`${row.spellName}, ${formatTime(s.startMs)} into ${single ? "the fight" : `phase ${phase.id}`}, ${Math.round(s.share * 100)}% of kills`}
+                        onClick={() => setPicked({ spellId: row.spellId, si: s.si })}
                       />
                     ))}
                   </div>
@@ -327,15 +382,16 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
           </div>
         ))}
       </div>
-      <Legend hint="Tap a slice for details" />
+      <Legend hint="Tap a slice for details" phased={!single} />
 
       {pickedRow && pickedGroup && picked && (
         <PhoneSheet
           row={pickedRow}
           group={pickedGroup.label}
           phase={phase}
-          slice={pickedRow.phases[pi][picked.si]}
+          slice={pickedRow.phases[view.pi][picked.si]}
           killCount={timeline.killCount}
+          single={single}
           onClose={() => setPicked(null)}
         />
       )}
@@ -343,9 +399,9 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
   );
 }
 
-function PhoneSheet(props: { row: TimelineRow; group: string; phase: TimelinePhase; slice: HeatSlice; killCount: number; onClose: () => void }) {
+function PhoneSheet(props: { row: TimelineRow; group: string; phase: TimelinePhase; slice: HeatSlice; killCount: number; single: boolean; onClose: () => void }) {
   const { row, phase, slice } = props;
-  const common = mostCommon(row, phase, slice);
+  const common = mostCommon(row, phase, slice, props.single);
   return (
     <div className="hm-sheet" role="dialog" aria-label={`${row.spellName} details`}>
       <div className="hm-sheet-head">
@@ -364,13 +420,15 @@ function PhoneSheet(props: { row: TimelineRow; group: string; phase: TimelinePha
           <span className="hm-tip-muted">Into the fight</span>
           <span className="hm-mono">{fightRange(phase, slice)}</span>
         </div>
-        <div>
-          <span className="hm-tip-muted">Since phase change</span>
-          <span className="hm-mono">{phaseRange(phase, slice)}</span>
-        </div>
+        {!props.single && (
+          <div>
+            <span className="hm-tip-muted">Since phase change</span>
+            <span className="hm-mono">{phaseRange(phase, slice)}</span>
+          </div>
+        )}
       </div>
       <div>
-        Pressed here in <strong>{Math.round(slice.share * 100)}%</strong> of kills{" "}
+        Pressed around here in <strong>{Math.round(slice.share * 100)}%</strong> of kills{" "}
         <span className="hm-tip-muted">
           ({slice.kills} of {props.killCount})
         </span>

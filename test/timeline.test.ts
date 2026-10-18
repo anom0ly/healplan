@@ -29,7 +29,8 @@ describe("buildTimeline", () => {
     kill({ durationMs: 300_000, casts: [cast(TRANQ, 132_000)] }),
     kill({ durationMs: 300_000, casts: [cast(TRANQ, 128_000)] }),
   ];
-  const timeline = buildTimeline(buildPlan(kills, kills[0].healers, { weight: { now: NOW } }));
+  const raw = { floor: 0, nearMs: 0 };
+  const timeline = buildTimeline(buildPlan(kills, kills[0].healers, { weight: { now: NOW } }), 4_000, raw);
 
   it("lays phases end to end across the fight", () => {
     expect(timeline.totalMs).toBe(300_000);
@@ -58,11 +59,33 @@ describe("buildTimeline", () => {
       kill({ phases: [], casts: [cast(TRANQ, 1_500)] }),
       kill({ casts: [cast(TRANQ, 130_000)] }),
     ];
-    const t = buildTimeline(buildPlan(kills, kills[0].healers, { weight: { now: NOW } }), 8_000);
+    const t = buildTimeline(buildPlan(kills, kills[0].healers, { weight: { now: NOW } }), 8_000, raw);
     const row = t.groups.flatMap((g) => g.rows).find((r) => r.spellId === TRANQ)!;
     expect(row.phases[0][0]).toMatchObject({ share: expect.closeTo(2 / 3, 5), kills: 2 });
     // Only two of the three kills reached phase 2, so one press there is half of them.
     expect(row.phases[1][1]).toMatchObject({ share: expect.closeTo(1 / 2, 5), kills: 1 });
+  });
+
+  it("counts presses near a slice toward it, so one spread-out press reads as one hot spot", () => {
+    const t = buildTimeline(buildPlan(kills, kills[0].healers, { weight: { now: NOW } }), 4_000, { floor: 0, nearMs: 4_000 });
+    const row = t.groups.flatMap((g) => g.rows).find((r) => r.spellId === TRANQ)!;
+    // Presses at 8s, 10s and 12s into phase 2 all count toward the 8–12s slice and both slices beside it.
+    expect(row.phases[1][1]).toMatchObject({ share: expect.closeTo(2 / 3, 5), kills: 2 });
+    expect(row.phases[1][2]).toMatchObject({ share: expect.closeTo(1, 5), kills: 3 });
+    expect(row.phases[1][3]).toMatchObject({ share: expect.closeTo(1, 5), kills: 3 });
+  });
+
+  it("leaves slices under the floor blank", () => {
+    const many = [
+      ...Array.from({ length: 9 }, () => kill({ casts: [cast(TRANQ, 130_000)] })),
+      kill({ casts: [cast(TRANQ, 130_000), cast(TRANQ, 200_000)] }),
+      ...Array.from({ length: 10 }, () => kill({ casts: [cast(TRANQ, 130_000)] })),
+    ];
+    const t = buildTimeline(buildPlan(many, many[0].healers, { weight: { now: NOW } }));
+    const row = t.groups.flatMap((g) => g.rows).find((r) => r.spellId === TRANQ)!;
+    // One kill in twenty (5%) pressed at 80s into phase 2: under the default 10% floor.
+    expect(row.phases[1][20]).toEqual({ startMs: 80_000, endMs: 84_000, share: 0, kills: 0 });
+    expect(row.phases[1][2].share).toBeCloseTo(1, 5);
   });
 
   it("groups cooldowns by the healer spec or class that casts them", () => {

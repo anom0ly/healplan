@@ -13,6 +13,7 @@ import {
 import { HEALER_SPECS, DIFFICULTY_ID, type Difficulty, type HealerSpec, type KillDamage, type KillRecord } from "./types";
 import type { WclClient } from "./wcl/client";
 import {
+  DAMAGE_BUCKET_MS,
   fightCasts,
   fightDamage,
   fightHealers,
@@ -242,11 +243,15 @@ export async function crawlBoss(wcl: WclClient, opts: CrawlOptions) {
 }
 
 const MAX_DAMAGE_FAILURES = 5;
+/** Errors Warcraft Logs gives for a report that's no longer public. */
+const GONE = /permission to view this report|report does not exist/i;
+const NO_DAMAGE: KillDamage = { bucketMs: DAMAGE_BUCKET_MS, total: [], top: [], names: {} };
 
 /**
  * Fetches damage taken for kills saved without it, newest first, until `limit` kills are done or only the
- * reserve of the hour's points is left. Kills that fail stay unfetched and are retried on the next run, and a run of
- * failures in a row ends the backfill so a broken query doesn't spend the hour's points.
+ * reserve of the hour's points is left. Kills whose report went private or lost the fight are stored with no damage so
+ * they aren't asked for again. Other failures stay unfetched and are retried on the next run, and a run of them in a
+ * row ends the backfill so a broken query doesn't spend the hour's points.
  */
 export async function backfillDamage(wcl: WclClient, opts: { limit: number; reservePoints: number; log?: (msg: string) => void }) {
   const log = opts.log ?? console.log;
@@ -264,6 +269,7 @@ export async function backfillDamage(wcl: WclClient, opts: { limit: number; rese
       const fight = fights.find((f) => f.id === k.fightId);
       if (!fight) {
         log(`No damage for ${k.reportCode}#${k.fightId}: fight not found`);
+        await saveDamage(k.reportCode, k.fightId, NO_DAMAGE);
         continue;
       }
       const damage = await fightDamage(wcl, k.reportCode, fight);
@@ -271,8 +277,14 @@ export async function backfillDamage(wcl: WclClient, opts: { limit: number; rese
       done++;
       failedInARow = 0;
     } catch (e) {
-      failedInARow++;
-      log(`No damage for ${k.reportCode}#${k.fightId}: ${(e as Error).message}`);
+      const message = (e as Error).message;
+      log(`No damage for ${k.reportCode}#${k.fightId}: ${message}`);
+      if (GONE.test(message)) {
+        // The report went private or was deleted, so it will never answer; don't ask again every run.
+        await saveDamage(k.reportCode, k.fightId, NO_DAMAGE);
+      } else {
+        failedInARow++;
+      }
     }
   }
   return { done, stopped: false };

@@ -94,7 +94,7 @@ const sliceBounds = (lengthMs: number, bucketMs: number) => {
  * length, and counts for every cooldown in the comp how much of the kill
  * weight pressed it in each slice of each phase.
  */
-export function buildTimeline(plan: Plan, bucketMs = 4_000): Timeline {
+export function buildTimeline(plan: Plan, bucketMs = 4_000, floor = 0): Timeline {
   const kills = plan.killsUsed;
   const lengths = phaseLengths(kills.map((w) => w.kill));
   if (lengths.length === 0) lengths.push({ id: 1, lengthMs: bucketMs });
@@ -145,7 +145,8 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000): Timeline {
       phases: perPhase.map((slices, pi) =>
         slices.map((byKill, si) => {
           const w = [...byKill.values()].reduce((a, b) => a + b, 0);
-          return { ...bounds[pi][si], share: reached[pi] > 0 ? Math.min(1, w / reached[pi]) : 0, kills: byKill.size };
+          const share = reached[pi] > 0 ? Math.min(1, w / reached[pi]) : 0;
+          return share < floor ? { ...bounds[pi][si], share: 0, kills: 0 } : { ...bounds[pi][si], share, kills: byKill.size };
         }),
       ),
       common: plan.timings.filter((t) => t.spellId === spellId).map((t) => ({ phaseId: t.phaseId, tPhaseMs: t.tPhaseMs })),

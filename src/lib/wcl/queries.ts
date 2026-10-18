@@ -1,3 +1,4 @@
+import type { KillDamage } from "../types";
 import type { WclClient } from "./client";
 
 export interface RankedFight {
@@ -163,6 +164,86 @@ export async function fightCasts(
     start = d.reportData.report.events.nextPageTimestamp;
   }
   return out;
+}
+
+interface GraphSeries {
+  name?: string;
+  /** The ability's game id when the graph is split by ability. */
+  guid?: number;
+  pointStart?: number;
+  pointInterval?: number;
+  /** One value per point, or [timestamp, value] pairs. */
+  data?: (number | [number, number] | null)[];
+}
+
+/** Damage slices are this long. */
+export const DAMAGE_BUCKET_MS = 5_000;
+const TOP_ABILITIES = 3;
+
+/**
+ * Turns a damage-taken graph split by ability into per-slice totals and the top abilities per slice.
+ * Each point is read as a rate over its interval and spread over the slices it overlaps, so the result
+ * doesn't depend on the interval Warcraft Logs picked for the graph.
+ */
+export function toKillDamage(series: GraphSeries[], fight: { startTime: number; endTime: number }, bucketMs = DAMAGE_BUCKET_MS): KillDamage {
+  const count = Math.max(1, Math.ceil((fight.endTime - fight.startTime) / bucketMs));
+  const byAbility = new Map<number, number[]>();
+  const names: Record<number, string> = {};
+  for (const s of series) {
+    if (typeof s.guid !== "number" || !s.data?.length) continue;
+    const interval = s.pointInterval ?? 1_000;
+    const amounts = byAbility.get(s.guid) ?? new Array<number>(count).fill(0);
+    s.data.forEach((point, j) => {
+      if (point === null) return;
+      const [t, v] = Array.isArray(point) ? point : [(s.pointStart ?? fight.startTime) + j * interval, point];
+      if (!(v > 0)) return;
+      const from = t - fight.startTime;
+      const to = from + interval;
+      for (let b = Math.max(0, Math.floor(from / bucketMs)); b < count && b * bucketMs < to; b++) {
+        const overlap = Math.min(to, (b + 1) * bucketMs) - Math.max(from, b * bucketMs);
+        if (overlap > 0) amounts[b] += (v * overlap) / 1000;
+      }
+    });
+    byAbility.set(s.guid, amounts);
+    if (s.name) names[s.guid] = s.name;
+  }
+  if (byAbility.size === 0) return { bucketMs, total: [], top: [], names: {} };
+
+  const round = (x: number) => Math.round(x);
+  const total = new Array<number>(count).fill(0);
+  const top: [number, number][][] = [];
+  for (let b = 0; b < count; b++) {
+    const hits: [number, number][] = [];
+    for (const [id, amounts] of byAbility) {
+      total[b] += amounts[b];
+      if (amounts[b] > 0) hits.push([id, round(amounts[b])]);
+    }
+    top.push(hits.sort((a, b) => b[1] - a[1]).slice(0, TOP_ABILITIES));
+  }
+  const used = new Set(top.flat().map(([id]) => id));
+  return {
+    bucketMs,
+    total: total.map(round),
+    top,
+    names: Object.fromEntries(Object.entries(names).filter(([id]) => used.has(Number(id)))),
+  };
+}
+
+/** Damage the raid took in one fight, split by the ability that did it. */
+export async function fightDamage(wcl: WclClient, code: string, fight: { id: number; startTime: number; endTime: number }) {
+  const d = await wcl.query<{ reportData: { report: { graph: { data?: { series?: GraphSeries[] } } } } }>(
+    `query($code: String!, $fightIDs: [Int]!, $start: Float!, $end: Float!) {
+      reportData { report(code: $code) {
+        graph(fightIDs: $fightIDs, startTime: $start, endTime: $end, dataType: DamageTaken, hostilityType: Friendlies, viewBy: Ability)
+      } }
+    }`,
+    { code, fightIDs: [fight.id], start: fight.startTime, end: fight.endTime },
+  );
+  const series = d.reportData.report.graph?.data?.series;
+  if (!Array.isArray(series)) {
+    throw new Error(`Unexpected damage graph shape: ${JSON.stringify(d.reportData.report.graph).slice(0, 200)}`);
+  }
+  return toKillDamage(series, fight);
 }
 
 /** Maps actor ids to player names for a report. */

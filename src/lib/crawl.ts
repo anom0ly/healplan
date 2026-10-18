@@ -3,15 +3,18 @@ import {
   getCrawlPage,
   getGuildKillHistory,
   hasKill,
+  killsMissingDamage,
   saveCrawlPage,
+  saveDamage,
   saveGuildKillHistory,
   saveKill,
   type GuildKillHistory,
 } from "./db";
-import { HEALER_SPECS, DIFFICULTY_ID, type Difficulty, type HealerSpec, type KillRecord } from "./types";
+import { HEALER_SPECS, DIFFICULTY_ID, type Difficulty, type HealerSpec, type KillDamage, type KillRecord } from "./types";
 import type { WclClient } from "./wcl/client";
 import {
   fightCasts,
+  fightDamage,
   fightHealers,
   fightRankings,
   guildReports,
@@ -73,14 +76,31 @@ interface KillMeta {
   firstKillConfirmed: boolean;
 }
 
-/** Fetches healers, phases and cooldown casts for one kill fight. */
-async function buildKillRecord(wcl: WclClient, meta: KillMeta, reportStart: number, fight: BossFight): Promise<KillRecord> {
+/** The raid's damage taken in a fight, or null when it couldn't be read, so a later backfill can try again. */
+async function tryFightDamage(wcl: WclClient, code: string, fight: BossFight, log: (msg: string) => void): Promise<KillDamage | null> {
+  try {
+    return await fightDamage(wcl, code, fight);
+  } catch (e) {
+    log(`No damage for ${code}#${fight.id}: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/** Fetches healers, phases, cooldown casts and damage taken for one kill fight. */
+async function buildKillRecord(
+  wcl: WclClient,
+  meta: KillMeta,
+  reportStart: number,
+  fight: BossFight,
+  log: (msg: string) => void,
+): Promise<KillRecord> {
   const healers = (await fightHealers(wcl, meta.reportCode, fight.id)).filter(
     (h): h is { actorId: number; name: string; spec: HealerSpec } => isHealerSpec(h.spec),
   );
   const specByName = new Map(healers.map((h) => [h.name, h.spec]));
   const actors = await reportActors(wcl, meta.reportCode);
   const raw = await fightCasts(wcl, meta.reportCode, fight, COOLDOWNS.map((c) => c.spellId));
+  const damage = await tryFightDamage(wcl, meta.reportCode, fight, log);
 
   return {
     ...meta,
@@ -98,6 +118,7 @@ async function buildKillRecord(wcl: WclClient, meta: KillMeta, reportStart: numb
         timestampMs: c.timestamp - fight.startTime,
       };
     }),
+    damage,
   };
 }
 
@@ -108,6 +129,7 @@ async function crawlFight(
   encounterId: number,
   difficulty: Difficulty,
   metric: RankingMetric,
+  log: (msg: string) => void,
 ): Promise<KillRecord | null> {
   const { reportStart, fights } = await reportPulls(wcl, ranked.reportCode, encounterId, DIFFICULTY_ID[difficulty]);
   const fight = fights.find((f) => f.id === ranked.fightId && f.kill);
@@ -141,6 +163,7 @@ async function crawlFight(
     },
     reportStart,
     fight,
+    log,
   );
 }
 
@@ -201,7 +224,7 @@ export async function crawlBoss(wcl: WclClient, opts: CrawlOptions) {
       if (await hasKill(ranked.reportCode, ranked.fightId)) continue;
       if (await overBudget(wcl, opts.reservePoints, log)) return stop();
       try {
-        const kill = await crawlFight(wcl, ranked, opts.zoneId, opts.encounterId, opts.difficulty, opts.metric);
+        const kill = await crawlFight(wcl, ranked, opts.zoneId, opts.encounterId, opts.difficulty, opts.metric, log);
         if (kill) {
           await saveKill(kill);
           saved++;
@@ -216,4 +239,41 @@ export async function crawlBoss(wcl: WclClient, opts: CrawlOptions) {
     if (!hasMorePages) break;
   }
   return { saved, stopped: false };
+}
+
+const MAX_DAMAGE_FAILURES = 5;
+
+/**
+ * Fetches damage taken for kills saved without it, newest first, until `limit` kills are done or only the
+ * reserve of the hour's points is left. Kills that fail stay unfetched and are retried on the next run, and a run of
+ * failures in a row ends the backfill so a broken query doesn't spend the hour's points.
+ */
+export async function backfillDamage(wcl: WclClient, opts: { limit: number; reservePoints: number; log?: (msg: string) => void }) {
+  const log = opts.log ?? console.log;
+  const kills = await killsMissingDamage(opts.limit);
+  let done = 0;
+  let failedInARow = 0;
+  for (const k of kills) {
+    if (failedInARow >= MAX_DAMAGE_FAILURES) {
+      log(`Stopped the damage backfill after ${failedInARow} failures in a row`);
+      break;
+    }
+    if (await overBudget(wcl, opts.reservePoints, log)) return { done, stopped: true };
+    try {
+      const { fights } = await reportPulls(wcl, k.reportCode, k.encounterId, DIFFICULTY_ID[k.difficulty]);
+      const fight = fights.find((f) => f.id === k.fightId);
+      if (!fight) {
+        log(`No damage for ${k.reportCode}#${k.fightId}: fight not found`);
+        continue;
+      }
+      const damage = await fightDamage(wcl, k.reportCode, fight);
+      await saveDamage(k.reportCode, k.fightId, damage);
+      done++;
+      failedInARow = 0;
+    } catch (e) {
+      failedInARow++;
+      log(`No damage for ${k.reportCode}#${k.fightId}: ${(e as Error).message}`);
+    }
+  }
+  return { done, stopped: false };
 }

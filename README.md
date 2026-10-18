@@ -11,6 +11,9 @@ Mythic and Heroic are both supported.
 1. **Nightly crawl** (`npm run crawl`) walks two Warcraft Logs rankings for each boss: **progress** (each guild's first kill, the same data as the Progress tab on the site) and then **speed** (the fastest recent kills). For every new kill it:
    - for speed-ranked kills, works out whether it was the guild's 1st, 2nd, 3rd or later kill by scanning the guild's public reports once (cached in `guild_kill_history`)
    - stores the healer lineup, phase start times, and casts of every cooldown in [`src/data/cooldowns.ts`](src/data/cooldowns.ts)
+   - stores the damage the raid took in 5-second slices, with the three abilities behind most of it in each slice (one damage-taken graph request per kill)
+
+   Points left at the end of a run fetch damage for up to `--damage` (default 200) kills saved without it, newest first. Five failures in a row end that step for the run.
 2. **Planning** ([`src/lib/engine`](src/lib/engine)) runs per request from the database, never against the live API:
    - **Weighting:** first kill 1.0, kills 2 to 3 get 0.6, farm kills 0.25. Recency halves every 14 days. Kills far from the median length are halved. Comp similarity (multiset Jaccard) multiplies in, and kills under 0.6 are dropped.
    - **Clustering:** casts are measured from the start of their phase, grouped when within 8 seconds of each other, and kept when at least 40% of the weighted kills agree.
@@ -67,7 +70,9 @@ The free Warcraft Logs API tier allows 3,600 points an hour. The crawler checks 
 - [x] Cooldown timeline, grouped by healer spec and class
 - [x] Heat-map timeline: per-slice press frequency, phase lines, hover details on desktop, phase tabs and tap details on phones
 - [x] Heat-map shading: 10% floor for stray presses, nearby presses count toward each slice, each row shaded against its own busiest moment; one-phase bosses show the whole fight (two-minute parts on phones)
-- [ ] Spec picker polish, damage overlay
+- [x] Spec picker: most-used comps on the boss as one-tap cards, plus build your own
+- [x] Damage overlay: raid damage per slice above the heat map, with the top ability and the cooldowns pressed there in tooltips and tap cards
+- [ ] Check the damage graph request against the live API on the first crawl
 - [ ] Your pulls compared with the plan, auto-assign, share links
 
 ## License

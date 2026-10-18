@@ -47,6 +47,22 @@ export interface KillRecord {
   firstKillConfirmed: boolean;
   phases: Phase[];
   casts: CastEvent[];
+  /** Damage the raid took over the fight. null = not fetched yet. */
+  damage?: KillDamage | null;
+}
+
+/**
+ * Damage the raid took, in slices of `bucketMs` from the pull. Amounts are only compared within one kill,
+ * so their unit doesn't matter. Empty arrays mean Warcraft Logs had no damage for the fight.
+ */
+export interface KillDamage {
+  bucketMs: number;
+  /** All damage taken in each slice. */
+  total: number[];
+  /** The abilities that did the most damage in each slice, up to three, as [abilityId, amount]. */
+  top: [number, number][][];
+  /** Names of the abilities in `top`, by id. */
+  names: Record<number, string>;
 }
 
 export const killKey = (k: Pick<KillRecord, "reportCode" | "fightId">) => `${k.reportCode}#${k.fightId}`;

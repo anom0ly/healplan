@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
 import { summarizeComps, type CompSummary } from "./engine/comp";
-import type { Difficulty, HealerSpec, KillRecord } from "./types";
+import type { Difficulty, HealerSpec, KillDamage, KillRecord } from "./types";
 
 let pool: pg.Pool | null = null;
 
@@ -25,12 +25,14 @@ export async function saveKill(k: KillRecord) {
     await client.query("BEGIN");
     await client.query(
       `INSERT INTO kills (report_code, fight_id, encounter_id, difficulty, guild_id, guild_name, kill_date,
-         duration_ms, healers, kill_index, first_kill_confirmed, phases)
-       VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7 / 1000.0), $8, $9, $10, $11, $12)
+         duration_ms, healers, kill_index, first_kill_confirmed, phases, damage)
+       VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7 / 1000.0), $8, $9, $10, $11, $12, $13)
        ON CONFLICT (report_code, fight_id) DO UPDATE SET
-         kill_index = EXCLUDED.kill_index, first_kill_confirmed = EXCLUDED.first_kill_confirmed, crawled_at = now()`,
+         kill_index = EXCLUDED.kill_index, first_kill_confirmed = EXCLUDED.first_kill_confirmed,
+         damage = COALESCE(EXCLUDED.damage, kills.damage), crawled_at = now()`,
       [k.reportCode, k.fightId, k.encounterId, k.difficulty, k.guildId, k.guildName, k.killDate,
-       k.durationMs, k.healers, k.killIndex, k.firstKillConfirmed, JSON.stringify(k.phases)],
+       k.durationMs, k.healers, k.killIndex, k.firstKillConfirmed, JSON.stringify(k.phases),
+       k.damage ? JSON.stringify(k.damage) : null],
     );
     await client.query("DELETE FROM casts WHERE report_code = $1 AND fight_id = $2", [k.reportCode, k.fightId]);
     for (const c of k.casts) {
@@ -83,6 +85,7 @@ export async function loadKills(encounterId: number, difficulty: Difficulty): Pr
     firstKillConfirmed: r.first_kill_confirmed,
     phases: r.phases,
     casts: byFight.get(`${r.report_code}#${r.fight_id}`) ?? [],
+    damage: r.damage,
   }));
 }
 
@@ -216,4 +219,22 @@ export async function replaceSpellCasts(reportCode: string, fightId: number, spe
   } finally {
     client.release();
   }
+}
+
+/** Kills whose damage hasn't been fetched yet, newest first. */
+export async function killsMissingDamage(limit: number) {
+  const r = await db().query(
+    `SELECT report_code, fight_id, encounter_id, difficulty FROM kills WHERE damage IS NULL ORDER BY kill_date DESC LIMIT $1`,
+    [limit],
+  );
+  return r.rows.map((row) => ({
+    reportCode: row.report_code as string,
+    fightId: row.fight_id as number,
+    encounterId: row.encounter_id as number,
+    difficulty: row.difficulty as Difficulty,
+  }));
+}
+
+export async function saveDamage(reportCode: string, fightId: number, damage: KillDamage) {
+  await db().query("UPDATE kills SET damage = $3 WHERE report_code = $1 AND fight_id = $2", [reportCode, fightId, JSON.stringify(damage)]);
 }

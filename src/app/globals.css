@@ -11,6 +11,7 @@
   --heat-2: 0.36;
   --heat-3: 0.6;
   --heat-4: 0.9;
+  --dmg: 194, 65, 12;
   --tip-bg: #1c1917;
   --tip-fg: #fafaf9;
   --tip-muted: #b8b2ad;
@@ -30,6 +31,7 @@
     --heat-2: 0.5;
     --heat-3: 0.72;
     --heat-4: 0.95;
+    --dmg: 251, 146, 60;
     --tip-bg: #fafaf9;
     --tip-fg: #1c1917;
     --tip-muted: #57534e;
@@ -97,6 +99,18 @@ pre { background: var(--line); padding: 12px; border-radius: 8px; overflow-x: au
 .hm-tip-muted { color: var(--tip-muted); }
 .hm-tip-strong { color: var(--tip-fg); }
 
+/* Raid damage: orange bars above the heat map, one per slice. */
+.hm-dmg-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; background: rgb(var(--dmg)); }
+.hm-dmg .hm-track { height: 48px; }
+.hm-bars { position: absolute; inset: 4px 0 0; display: flex; border-bottom: 1px solid var(--line); }
+.hm-bar, .hm-phone-bars button { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.hm-bar span, .hm-phone-bars span { display: block; width: calc(100% - 2px); border-radius: 2px 2px 0 0; background: rgb(var(--dmg)); }
+.hm-bar-on span { box-shadow: 0 0 0 2px var(--fg); }
+.hm-dmg-top { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.hm-dmg-top > span:nth-child(2) { flex: 1 1 auto; }
+.hm-dmg-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: rgb(var(--dmg)); }
+.hm-pressed { display: flex; justify-content: space-between; gap: 12px; }
+
 .hm-phone { display: none; }
 @media (max-width: 700px) {
   .hm-desktop { display: none; }
@@ -125,6 +139,9 @@ pre { background: var(--line); padding: 12px; border-radius: 8px; overflow-x: au
   .hm-phone-strip { display: flex; gap: 2px; height: 32px; }
   .hm-phone-strip button { flex: 1 1 0; min-width: 0; height: 100%; padding: 0; border-radius: 3px; }
   .hm-phone-strip .hm-l0 { background: var(--track); }
+  .hm-phone-dmg { padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+  .hm-phone-bars { display: flex; gap: 2px; height: 40px; }
+  .hm-phone-bars button { padding: 0; border: 0; border-radius: 0; background: transparent; justify-self: auto; }
   .hm-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; flex-direction: column; gap: 8px; padding: 14px 16px 22px; border-radius: 16px 16px 0 0; background: var(--tip-bg); color: var(--tip-fg); font-size: 14px; box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.25); }
   .hm-sheet-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .hm-sheet-head .hm-tip-title { font-size: 16px; }

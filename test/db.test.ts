@@ -69,4 +69,14 @@ describe.skipIf(!url)("db round trip", () => {
     const [loaded] = await mod.loadKills(997, "mythic");
     expect(loaded.casts).toHaveLength(2); // the existing Tranquility cast is kept
   });
+
+  it("counts kills per healer lineup, whatever order the healers were saved in", async () => {
+    await mod.saveKill(kill({ encounterId: 996, healers: ["HolyPaladin", "RestorationDruid"] }));
+    await mod.saveKill(kill({ encounterId: 996, healers: ["RestorationDruid", "HolyPaladin"], killIndex: 2 }));
+    await mod.saveKill(kill({ encounterId: 996, healers: ["MistweaverMonk"] }));
+    expect(await mod.listComps(996, "mythic")).toEqual([
+      { healers: ["RestorationDruid", "HolyPaladin"], kills: 2, firstKills: 1 },
+      { healers: ["MistweaverMonk"], kills: 1, firstKills: 1 },
+    ]);
+  });
 });

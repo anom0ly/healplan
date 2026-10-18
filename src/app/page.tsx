@@ -2,9 +2,9 @@ import { listBosses, loadKills, type BossOption } from "@/lib/db";
 import { buildPlan, type Plan } from "@/lib/engine/plan";
 import { formatTime, toNote } from "@/lib/engine/note";
 import { buildTimeline } from "@/lib/engine/timeline";
-import { parsePlanRequest } from "@/lib/request";
-import { HEALER_SPECS, SPEC_LABEL } from "@/lib/types";
+import { parseComp, parsePlanRequest } from "@/lib/request";
 import { Heatmap } from "./heatmap";
+import { Picker } from "./picker";
 
 export const dynamic = "force-dynamic";
 
@@ -35,61 +35,20 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
         When guilds with your healing comp used their cooldowns, weighted toward first kills and recent kills.
       </p>
 
-      <form method="get">
-        {bosses.length > 0 ? (
-          <label>
-            Boss
-            <select name="encounter" defaultValue={val("encounter") || String(bosses[0].id)} required>
-              {groupByZone(bosses).map(([zoneName, zoneBosses]) => (
-                <optgroup key={zoneName} label={zoneName}>
-                  {zoneBosses.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name} ({b.kills.mythic.toLocaleString("en-US")} Mythic, {b.kills.heroic.toLocaleString("en-US")} Heroic kills)
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <label>
-            Encounter id
-            <input name="encounter" type="number" defaultValue={val("encounter")} required />
-          </label>
-        )}
-        <label>
-          Difficulty
-          <select name="difficulty" defaultValue={val("difficulty") || "mythic"}>
-            <option value="mythic">Mythic</option>
-            <option value="heroic">Heroic</option>
-          </select>
-        </label>
-        <fieldset>
-          <legend>Healing comp</legend>
-          {HEALER_SPECS.map((spec) => (
-            <label key={spec}>
-              {SPEC_LABEL[spec]}
-              <input name={spec} type="number" min={0} max={6} defaultValue={val(spec) || "0"} />
-            </label>
-          ))}
-        </fieldset>
-        <label>
-          <input name="firstKillsOnly" type="checkbox" value="1" defaultChecked={val("firstKillsOnly") === "1"} />
-          First kills only
-        </label>
-        <button type="submit">Show cooldowns</button>
-      </form>
+      <Picker
+        bosses={bosses}
+        initial={{
+          encounter: val("encounter"),
+          difficulty: val("difficulty") === "heroic" ? "heroic" : "mythic",
+          comp: parseComp(params),
+          firstKillsOnly: val("firstKillsOnly") === "1",
+        }}
+      />
 
       {error && <p>Couldn&apos;t load kills: {error}</p>}
       {plan && <PlanView plan={plan} />}
     </main>
   );
-}
-
-function groupByZone(bosses: BossOption[]): [string, BossOption[]][] {
-  const zones = new Map<string, BossOption[]>();
-  for (const b of bosses) zones.set(b.zoneName, [...(zones.get(b.zoneName) ?? []), b]);
-  return [...zones];
 }
 
 function PlanView({ plan }: { plan: Plan }) {

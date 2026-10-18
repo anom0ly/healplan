@@ -19,11 +19,17 @@ export function parsePlanRequest(params: Params): PlanRequest | null {
   const encounterId = Number(one(params.encounter));
   if (!Number.isInteger(encounterId) || encounterId <= 0) return null;
   const difficulty: Difficulty = one(params.difficulty) === "heroic" ? "heroic" : "mythic";
+  const comp = parseComp(params);
+  if (comp.length === 0) return null;
+  return { encounterId, difficulty, comp, firstKillsOnly: one(params.firstKillsOnly) === "1" };
+}
+
+/** Reads the healers from query params (`RestorationDruid=2&HolyPaladin=1`), up to 6 of each spec. */
+export function parseComp(params: Params): HealerSpec[] {
   const comp: HealerSpec[] = [];
   for (const spec of HEALER_SPECS) {
     const n = Math.min(6, Math.max(0, Math.floor(Number(one(params[spec]) ?? 0)) || 0));
     for (let i = 0; i < n; i++) comp.push(spec);
   }
-  if (comp.length === 0) return null;
-  return { encounterId, difficulty, comp, firstKillsOnly: one(params.firstKillsOnly) === "1" };
+  return comp;
 }

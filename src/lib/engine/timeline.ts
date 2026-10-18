@@ -94,7 +94,7 @@ const sliceBounds = (lengthMs: number, bucketMs: number) => {
  * length, and counts for every cooldown in the comp how much of the kill
  * weight pressed it in each slice of each phase.
  */
-export function buildTimeline(plan: Plan, bucketMs = 4_000, floor = 0): Timeline {
+export function buildTimeline(plan: Plan, bucketMs = 4_000, floor = 0, nearMs = 0): Timeline {
   const kills = plan.killsUsed;
   const lengths = phaseLengths(kills.map((w) => w.kill));
   if (lengths.length === 0) lengths.push({ id: 1, lengthMs: bucketMs });
@@ -143,7 +143,13 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000, floor = 0): Timeline
       spellName: cd?.name ?? `Spell ${spellId}`,
       spec: cd?.spec ?? null,
       phases: perPhase.map((slices, pi) =>
-        slices.map((byKill, si) => {
+        slices.map((_, si) => {
+          // Counts presses within `nearMs` of the slice too, so one press spread over a few seconds reads as one hot spot.
+          const reach = Math.floor(nearMs / bucketMs);
+          const byKill = new Map<string, number>();
+          for (let k = Math.max(0, si - reach); k <= Math.min(slices.length - 1, si + reach); k++) {
+            for (const [key, weight] of slices[k]) byKill.set(key, weight);
+          }
           const w = [...byKill.values()].reduce((a, b) => a + b, 0);
           const share = reached[pi] > 0 ? Math.min(1, w / reached[pi]) : 0;
           return share < floor ? { ...bounds[pi][si], share: 0, kills: 0 } : { ...bounds[pi][si], share, kills: byKill.size };

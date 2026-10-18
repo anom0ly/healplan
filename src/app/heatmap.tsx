@@ -50,18 +50,27 @@ function Legend({ hint, phased }: { hint: string; phased: boolean }) {
   );
 }
 
-export function Heatmap({ desktop, phone }: { desktop: Timeline; phone: Timeline }) {
+type Scale = "fixed" | "row";
+
+/** Shade for one slice: by its share of kills, or against the row's own busiest slice. */
+function rowShade(row: TimelineRow, scale: Scale) {
+  if (scale === "fixed") return (share: number) => level(share);
+  const max = Math.max(...row.phases.flat().map((s) => s.share), 0.0001);
+  return (share: number) => level(share / max);
+}
+
+export function Heatmap({ desktop, phone, scale = "fixed" }: { desktop: Timeline; phone: Timeline; scale?: Scale }) {
   return (
     <section aria-label="Cooldown heat map">
-      <DesktopHeatmap timeline={desktop} />
-      <PhoneHeatmap timeline={phone} />
+      <DesktopHeatmap timeline={desktop} scale={scale} />
+      <PhoneHeatmap timeline={phone} scale={scale} />
     </section>
   );
 }
 
 type Hover = { key: string; pi: number; si: number } | null;
 
-function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
+function DesktopHeatmap({ timeline, scale }: { timeline: Timeline; scale: Scale }) {
   const [hover, setHover] = useState<Hover>(null);
   const { phases, totalMs } = timeline;
   // A boss with no phase changes reads as one fight, with no phase labels.
@@ -161,7 +170,7 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
                 <div key={row.spellId} className="hm-row">
                   <div className="hm-label">{row.spellName}</div>
                   <div className="hm-track" onMouseLeave={() => setHover(null)}>
-                    {strip(key, row.phases.map((slices) => slices.map((s) => ({ level: level(s.share) }))))}
+                    {strip(key, row.phases.map((slices) => slices.map((s) => ({ level: rowShade(row, scale)(s.share) }))))}
                     {h && (
                       <SliceTip
                         row={row}
@@ -246,7 +255,7 @@ function phoneViews(phases: TimelinePhase[]): PhoneView[] {
   }));
 }
 
-function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
+function PhoneHeatmap({ timeline, scale }: { timeline: Timeline; scale: Scale }) {
   const { phases, totalMs } = timeline;
   const views = phoneViews(phases);
   const [vi, setVi] = useState(0);
@@ -363,7 +372,7 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
                       <button
                         key={s.si}
                         type="button"
-                        className={`hm-l${level(s.share)}${picked?.spellId === row.spellId && picked.si === s.si ? " hm-on" : ""}`}
+                        className={`hm-l${rowShade(row, scale)(s.share)}${picked?.spellId === row.spellId && picked.si === s.si ? " hm-on" : ""}`}
                         style={{ flexGrow: s.endMs - s.startMs }}
                         aria-label={`${row.spellName}, ${formatTime(s.startMs)} into ${single ? "the fight" : `phase ${phase.id}`}, ${Math.round(s.share * 100)}% of kills`}
                         onClick={() => setPicked({ spellId: row.spellId, si: s.si })}

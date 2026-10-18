@@ -81,7 +81,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       </form>
 
       {error && <p>Couldn&apos;t load kills: {error}</p>}
-      {plan && <PlanView plan={plan} floor={Number(val("floor") || 0) / 100} />}
+      {plan && <PlanView plan={plan} floor={Number(val("floor") || 0) / 100} near={Number(val("near") || 0) * 1000} scale={val("scale") === "row" ? "row" : "fixed"} />}
     </main>
   );
 }
@@ -92,7 +92,7 @@ function groupByZone(bosses: BossOption[]): [string, BossOption[]][] {
   return [...zones];
 }
 
-function PlanView({ plan, floor }: { plan: Plan; floor: number }) {
+function PlanView({ plan, floor, near, scale }: { plan: Plan; floor: number; near: number; scale: "fixed" | "row" }) {
   if (plan.killsUsed.length === 0) return <p>No matching kills yet. Try a looser comp or turn off first kills only.</p>;
   return (
     <section>
@@ -100,7 +100,7 @@ function PlanView({ plan, floor }: { plan: Plan; floor: number }) {
         Based on {plan.killsUsed.length} kills, {plan.killsUsed.filter((k) => k.kill.killIndex === 1).length} of them
         first kills.
       </p>
-      <Heatmap desktop={buildTimeline(plan, 4_000, floor)} phone={buildTimeline(plan, 8_000, floor)} />
+      <Heatmap desktop={buildTimeline(plan, 4_000, floor, near)} phone={buildTimeline(plan, 8_000, floor, near)} scale={scale} />
       <h2>Timings</h2>
       <table>
         <thead>

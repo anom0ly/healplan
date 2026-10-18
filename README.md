@@ -60,7 +60,7 @@ The free Warcraft Logs API tier allows 3,600 points an hour. The crawler checks 
 - [x] Engine: weighting, comp matching, phase-relative clustering, note export
 - [x] Crawler and Postgres schema
 - [x] Basic page and `/api/plan` JSON endpoint
-- [ ] Fix the 3 cooldown spell ids that don't appear in crawled kills: Evangelism, Rapture, Emerald Communion (`/api/cooldowns` shows counts; `npm run spells -- --encounter <id> --spec DisciplinePriest` lists what one healer spec actually casts, and needs the same variables as the crawler)
+- [x] Verify cooldown spell ids against real casts (`npm run spells -- --encounter <id> [--spec DisciplinePriest]` lists what each healer spec actually casts, and needs the same variables as the crawler)
 - [ ] Check the crawler against the live API
 - [x] Boss picker (filled from crawled bosses, with kill counts)
 - [ ] Spec picker polish, heatmap timeline, damage overlay

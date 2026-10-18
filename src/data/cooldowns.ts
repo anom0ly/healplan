@@ -7,6 +7,8 @@ export interface Cooldown {
   name: string;
   /** null = usable by any class (raid-wide cooldowns from non-healers). */
   spec: HealerSpec | null;
+  /** The class that casts a raid-wide cooldown, for grouping (healer cooldowns group by spec). */
+  className?: string;
   kind: CooldownKind;
   /** Base cooldown in seconds before talents. The engine prefers the observed recast time. */
   baseCooldownSec: number;
@@ -47,9 +49,9 @@ export const COOLDOWNS: Cooldown[] = [
   { spellId: 359816, name: "Dream Flight", spec: "PreservationEvoker", kind: "healing", baseCooldownSec: 120, verified: true },
   { spellId: 374227, name: "Zephyr", spec: "PreservationEvoker", kind: "damage-reduction", baseCooldownSec: 120, verified: true },
   // Raid-wide cooldowns from other roles
-  { spellId: 97462, name: "Rallying Cry", spec: null, kind: "damage-reduction", baseCooldownSec: 180, verified: true },
-  { spellId: 51052, name: "Anti-Magic Zone", spec: null, kind: "damage-reduction", baseCooldownSec: 120, verified: true },
-  { spellId: 196718, name: "Darkness", spec: null, kind: "damage-reduction", baseCooldownSec: 300, verified: true },
+  { spellId: 97462, name: "Rallying Cry", spec: null, className: "Warrior", kind: "damage-reduction", baseCooldownSec: 180, verified: true },
+  { spellId: 51052, name: "Anti-Magic Zone", spec: null, className: "Death Knight", kind: "damage-reduction", baseCooldownSec: 120, verified: true },
+  { spellId: 196718, name: "Darkness", spec: null, className: "Demon Hunter", kind: "damage-reduction", baseCooldownSec: 300, verified: true },
 ];
 
 export const COOLDOWN_BY_ID = new Map(COOLDOWNS.map((c) => [c.spellId, c]));

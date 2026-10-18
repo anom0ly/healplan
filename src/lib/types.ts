@@ -50,3 +50,14 @@ export interface KillRecord {
 }
 
 export const killKey = (k: Pick<KillRecord, "reportCode" | "fightId">) => `${k.reportCode}#${k.fightId}`;
+
+/** Short names for healer specs, as raiders say them. */
+export const SPEC_LABEL: Record<HealerSpec, string> = {
+  RestorationDruid: "Resto Druid",
+  HolyPaladin: "Holy Paladin",
+  DisciplinePriest: "Disc Priest",
+  HolyPriest: "Holy Priest",
+  RestorationShaman: "Resto Shaman",
+  MistweaverMonk: "Mistweaver",
+  PreservationEvoker: "Preservation",
+};

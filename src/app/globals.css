@@ -27,3 +27,20 @@ button { justify-self: start; padding: 8px 16px; border-radius: 6px; border: 0; 
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 pre { background: var(--line); padding: 12px; border-radius: 8px; overflow-x: auto; }
+
+.timeline { margin: 16px 0 24px; font-size: 13px; }
+.tl-row { display: grid; grid-template-columns: 150px 1fr; align-items: center; min-height: 30px; }
+.tl-label { padding-right: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-track { position: relative; height: 30px; border-bottom: 1px solid var(--line); }
+.tl-head .tl-track { border-bottom: 0; }
+.tl-phase { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--line); }
+.tl-phase-name { padding: 6px 4px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+.tl-group-name { margin-top: 10px; font-weight: 600; }
+.tl-spread { position: absolute; top: 9px; height: 12px; border-radius: 6px; background: var(--accent); }
+.tl-mark { position: absolute; top: 5px; width: 2px; height: 20px; margin-left: -1px; background: var(--fg); }
+.tl-time { position: absolute; top: 7px; margin-left: 5px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.tl-legend { margin-top: 8px; }
+@media (max-width: 600px) {
+  .tl-row { grid-template-columns: 96px 1fr; }
+  .tl-time { display: none; }
+}

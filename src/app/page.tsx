@@ -1,20 +1,11 @@
 import { listBosses, loadKills, type BossOption } from "@/lib/db";
 import { buildPlan, type Plan } from "@/lib/engine/plan";
 import { formatTime, toNote } from "@/lib/engine/note";
+import { buildTimeline, type Timeline } from "@/lib/engine/timeline";
 import { parsePlanRequest } from "@/lib/request";
-import { HEALER_SPECS } from "@/lib/types";
+import { HEALER_SPECS, SPEC_LABEL } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-
-const SPEC_LABEL: Record<(typeof HEALER_SPECS)[number], string> = {
-  RestorationDruid: "Resto Druid",
-  HolyPaladin: "Holy Paladin",
-  DisciplinePriest: "Disc Priest",
-  HolyPriest: "Holy Priest",
-  RestorationShaman: "Resto Shaman",
-  MistweaverMonk: "Mistweaver",
-  PreservationEvoker: "Preservation",
-};
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -108,6 +99,8 @@ function PlanView({ plan }: { plan: Plan }) {
         Based on {plan.killsUsed.length} kills, {plan.killsUsed.filter((k) => k.kill.killIndex === 1).length} of them
         first kills.
       </p>
+      <TimelineView timeline={buildTimeline(plan)} />
+      <h2>Timings</h2>
       <table>
         <thead>
           <tr>
@@ -149,6 +142,55 @@ function PlanView({ plan }: { plan: Plan }) {
             </li>
           ))}
       </ul>
+    </section>
+  );
+}
+
+function TimelineView({ timeline }: { timeline: Timeline }) {
+  const phaseGrid = timeline.phases.map((p) => (
+    <div key={p.id} className="tl-phase" style={{ left: `${p.leftPct}%`, width: `${p.widthPct}%` }} />
+  ));
+  return (
+    <section className="timeline" aria-label="Cooldown timeline">
+      <div className="tl-row tl-head">
+        <div className="tl-label" />
+        <div className="tl-track">
+          {timeline.phases.map((p) => (
+            <div key={p.id} className="tl-phase tl-phase-name" style={{ left: `${p.leftPct}%`, width: `${p.widthPct}%` }}>
+              P{p.id} <span className="muted">{formatTime(p.lengthMs)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      {timeline.groups.map((g) => (
+        <div key={g.label} className="tl-group">
+          <div className="tl-group-name">
+            {g.label}
+            {g.count > 1 && <span className="muted"> ×{g.count}</span>}
+          </div>
+          {g.rows.map((row) => (
+            <div key={row.spellId} className="tl-row">
+              <div className="tl-label">{row.spellName}</div>
+              <div className="tl-track">
+                {phaseGrid}
+                {row.marks.map((m) => (
+                  <div
+                    key={`${m.phaseId}-${m.tPhaseMs}`}
+                    title={`P${m.phaseId} ${formatTime(m.tPhaseMs)} (${formatTime(m.earliestMs)} to ${formatTime(m.latestMs)}), ${Math.round(m.support * 100)}% of ${m.killCount} kills`}
+                  >
+                    <div className="tl-spread" style={{ left: `${m.fromPct}%`, width: `${Math.max(m.toPct - m.fromPct, 0.5)}%`, opacity: 0.25 + m.support * 0.5 }} />
+                    <div className="tl-mark" style={{ left: `${m.atPct}%` }} />
+                    <span className="tl-time" style={{ left: `${m.toPct}%` }}>
+                      {formatTime(m.tPhaseMs)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+      <p className="muted tl-legend">Each mark is when guilds with your comp usually press the cooldown, timed from the start of its phase. The band shows the spread, and a darker band means more guilds agree.</p>
     </section>
   );
 }

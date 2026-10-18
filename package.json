@@ -11,7 +11,8 @@
     "test": "vitest run",
     "crawl": "tsx scripts/crawl.ts",
     "migrate": "tsx scripts/migrate.ts",
-    "spells": "tsx scripts/spells.ts"
+    "spells": "tsx scripts/spells.ts",
+    "backfill": "tsx scripts/backfill.ts"
   },
   "dependencies": {
     "next": "^15.5.28",

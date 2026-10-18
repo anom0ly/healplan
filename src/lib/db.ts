@@ -168,3 +168,41 @@ export async function castCounts(): Promise<Map<number, { casts: number; kills: 
   );
   return new Map(r.rows.map((row) => [row.spell_id, { casts: row.casts, kills: row.kills }]));
 }
+
+/** Kills with a healer of this spec and no stored casts of any of these spells, newest first. */
+export async function killsMissingSpells(spec: HealerSpec, spellIds: number[], limit: number) {
+  const r = await db().query(
+    `SELECT report_code, fight_id, encounter_id, difficulty FROM kills k
+     WHERE $1 = ANY (k.healers)
+       AND NOT EXISTS (SELECT 1 FROM casts c WHERE c.report_code = k.report_code AND c.fight_id = k.fight_id AND c.spell_id = ANY ($2))
+     ORDER BY kill_date DESC LIMIT $3`,
+    [spec, spellIds, limit],
+  );
+  return r.rows.map((row) => ({
+    reportCode: row.report_code as string,
+    fightId: row.fight_id as number,
+    encounterId: row.encounter_id as number,
+    difficulty: row.difficulty as Difficulty,
+  }));
+}
+
+/** Replaces one kill's stored casts of the given spells. */
+export async function replaceSpellCasts(reportCode: string, fightId: number, spellIds: number[], casts: KillRecord["casts"]) {
+  const client = await db().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM casts WHERE report_code = $1 AND fight_id = $2 AND spell_id = ANY ($3)", [reportCode, fightId, spellIds]);
+    for (const c of casts) {
+      await client.query(
+        `INSERT INTO casts (report_code, fight_id, spell_id, source, source_spec, timestamp_ms) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [reportCode, fightId, c.spellId, c.source, c.sourceSpec, c.timestampMs],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}

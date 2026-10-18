@@ -28,8 +28,8 @@ export const COOLDOWNS: Cooldown[] = [
   { spellId: 31884, name: "Avenging Wrath", spec: "HolyPaladin", kind: "throughput", baseCooldownSec: 120, verified: true },
   // Discipline Priest
   { spellId: 62618, name: "Power Word: Barrier", spec: "DisciplinePriest", kind: "damage-reduction", baseCooldownSec: 180, verified: true },
-  { spellId: 246287, name: "Evangelism", spec: "DisciplinePriest", kind: "healing", baseCooldownSec: 90, verified: false },
-  { spellId: 47536, name: "Rapture", spec: "DisciplinePriest", kind: "healing", baseCooldownSec: 90, verified: false },
+  { spellId: 472433, name: "Evangelism", spec: "DisciplinePriest", kind: "healing", baseCooldownSec: 90, verified: true },
+  { spellId: 421453, name: "Ultimate Penitence", spec: "DisciplinePriest", kind: "healing", baseCooldownSec: 240, verified: true },
   // Holy Priest
   { spellId: 64843, name: "Divine Hymn", spec: "HolyPriest", kind: "healing", baseCooldownSec: 180, verified: true },
   { spellId: 200183, name: "Apotheosis", spec: "HolyPriest", kind: "throughput", baseCooldownSec: 120, verified: true },
@@ -45,7 +45,6 @@ export const COOLDOWNS: Cooldown[] = [
   // Preservation Evoker
   { spellId: 363534, name: "Rewind", spec: "PreservationEvoker", kind: "healing", baseCooldownSec: 240, verified: true },
   { spellId: 359816, name: "Dream Flight", spec: "PreservationEvoker", kind: "healing", baseCooldownSec: 120, verified: true },
-  { spellId: 370960, name: "Emerald Communion", spec: "PreservationEvoker", kind: "healing", baseCooldownSec: 180, verified: false },
   { spellId: 374227, name: "Zephyr", spec: "PreservationEvoker", kind: "damage-reduction", baseCooldownSec: 120, verified: true },
   // Raid-wide cooldowns from other roles
   { spellId: 97462, name: "Rallying Cry", spec: null, kind: "damage-reduction", baseCooldownSec: 180, verified: true },

@@ -54,4 +54,19 @@ describe.skipIf(!url)("db round trip", () => {
     expect(bosses[1]).toMatchObject({ zoneName: "Test Raid", kills: { mythic: 1, heroic: 0 } });
     expect((await mod.castCounts()).get(740)).toEqual({ casts: 1, kills: 1 });
   });
+
+  it("finds kills missing newly listed spells and backfills them", async () => {
+    const k = kill({ encounterId: 997, casts: [cast(740, 10_000, "Leafy")] });
+    await mod.saveKill(k);
+    const missing = await mod.killsMissingSpells("DisciplinePriest", [472433], 1000);
+    expect(missing).toContainEqual({ reportCode: k.reportCode, fightId: 1, encounterId: 997, difficulty: "mythic" });
+    expect(await mod.killsMissingSpells("MistweaverMonk", [472433], 1000)).toEqual([]);
+
+    const evangelism = { spellId: 472433, source: "Shadowy", sourceSpec: "DisciplinePriest" as const, timestampMs: 20_000 };
+    await mod.replaceSpellCasts(k.reportCode, 1, [472433], [evangelism]);
+    await mod.replaceSpellCasts(k.reportCode, 1, [472433], [evangelism]); // re-running doesn't duplicate
+    expect((await mod.killsMissingSpells("DisciplinePriest", [472433], 1000)).map((m) => m.reportCode)).not.toContain(k.reportCode);
+    const [loaded] = await mod.loadKills(997, "mythic");
+    expect(loaded.casts).toHaveLength(2); // the existing Tranquility cast is kept
+  });
 });

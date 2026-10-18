@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { formatTime } from "@/lib/engine/note";
-import type { HeatSlice, Timeline, TimelinePhase, TimelineRow } from "@/lib/engine/timeline";
+import type { DamageSlice, HeatSlice, Timeline, TimelinePhase, TimelineRow } from "@/lib/engine/timeline";
 
 /** Heat level 0 to 4 for a value in [0, 1], such as a slice's share against its row's busiest slice. */
 const level = (share: number) => (share <= 0 ? 0 : share < 0.15 ? 1 : share < 0.35 ? 2 : share < 0.6 ? 3 : 4);
@@ -23,6 +23,72 @@ function mostCommon(row: TimelineRow, p: TimelinePhase, s: HeatSlice, single: bo
   return single ? formatTime(near.tPhaseMs) : `${formatTime(p.startMs + near.tPhaseMs)} · P${p.id} +${formatTime(near.tPhaseMs)}`;
 }
 
+/** Height of a damage bar, 0 to 1, against the slice that hurts most. */
+const maxRatio = (damage: DamageSlice[][]) => Math.max(...damage.flat().map((d) => d.ratio ?? 0), 0.0001);
+const ratioText = (r: number) => `${r < 10 ? r.toFixed(1) : Math.round(r)}×`;
+
+/** The cooldowns most often pressed in one slice, busiest first. */
+function pressedHere(timeline: Timeline, pi: number, si: number, limit = 3) {
+  return timeline.groups
+    .flatMap((g) => g.rows)
+    .map((r) => ({ name: r.spellName, share: r.phases[pi][si].share }))
+    .filter((r) => r.share > 0)
+    .sort((a, b) => b.share - a.share)
+    .slice(0, limit);
+}
+
+/** Raid damage in a slice: how heavy it is and what's behind it. */
+function DamageLines({ d }: { d: DamageSlice }) {
+  if (d.ratio === null) return null;
+  return (
+    <>
+      <div>
+        Raid takes <strong>{ratioText(d.ratio)}</strong> the fight&apos;s average damage
+      </div>
+      {d.top && (
+        <div className="hm-dmg-top">
+          <span className="hm-dmg-dot" aria-hidden="true" />
+          <span>
+            Mostly <strong>{d.top.name}</strong>
+          </span>
+          <span className="hm-mono">{Math.round(d.top.share * 100)}%</span>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** One line for cooldown tooltips: the raid damage in the same slice. */
+function DamageNote({ d }: { d: DamageSlice | undefined }) {
+  if (!d || d.ratio === null) return null;
+  return (
+    <div className="hm-tip-muted">
+      Raid damage <span className="hm-tip-strong">{ratioText(d.ratio)}</span> average
+      {d.top && (
+        <>
+          , mostly <span className="hm-tip-strong">{d.top.name}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+function PressedList({ timeline, pi, si }: { timeline: Timeline; pi: number; si: number }) {
+  const list = pressedHere(timeline, pi, si);
+  if (list.length === 0) return <div className="hm-tip-muted">No cooldown usually pressed here</div>;
+  return (
+    <div>
+      <div className="hm-tip-muted">Pressed here in</div>
+      {list.map((r) => (
+        <div key={r.name} className="hm-pressed">
+          <span>{r.name}</span>
+          <span className="hm-mono">{Math.round(r.share * 100)}%</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ticks(totalMs: number, fromMs = 0) {
   const step = totalMs > 480_000 ? 60_000 : 30_000;
   const out: number[] = [];
@@ -30,7 +96,7 @@ function ticks(totalMs: number, fromMs = 0) {
   return out.map((t) => ({ t, pct: (t / totalMs) * 100, label: formatTime(fromMs + t) }));
 }
 
-function Legend({ hint, phased }: { hint: string; phased: boolean }) {
+function Legend({ hint, phased, damage }: { hint: string; phased: boolean; damage: boolean }) {
   return (
     <div className="hm-legend">
       <span>Less often</span>
@@ -40,6 +106,11 @@ function Legend({ hint, phased }: { hint: string; phased: boolean }) {
         ))}
       </span>
       <span>Busiest time for that cooldown</span>
+      {damage && (
+        <span className="hm-legend-phase">
+          <span className="hm-dmg-swatch" aria-hidden="true" /> Raid damage taken
+        </span>
+      )}
       {phased && (
         <span className="hm-legend-phase">
           <span className="hm-dotted" aria-hidden="true" /> Phase change
@@ -104,7 +175,7 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
 
   return (
     <div className="hm-desktop">
-      <Legend hint="Hover a slice for times and how often it's pressed" phased={!single} />
+      <Legend hint="Hover a slice for times and how often it's pressed" phased={!single} damage={!!timeline.damage} />
       <div className="hm-card">
         <div className="hm-row hm-head">
           <div />
@@ -119,6 +190,55 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
             ))}
           </div>
         </div>
+
+        {timeline.damage && (
+          <div className="hm-row hm-dmg">
+            <div className="hm-label">
+              <strong>Raid damage</strong>
+            </div>
+            <div className="hm-track" onMouseLeave={() => setHover(null)}>
+              <div className="hm-bars">
+                {phases.map((p, pi) => (
+                  <div key={p.id} className={`hm-phase${pi > 0 ? " hm-phase-break" : ""}`} style={{ width: `${p.widthPct}%` }}>
+                    {timeline.damage![pi].map((d, si) => (
+                      <DamageBar
+                        key={si}
+                        d={d}
+                        max={maxRatio(timeline.damage!)}
+                        on={hover?.key === "dmg" && hover.pi === pi && hover.si === si}
+                        onEnter={() => setHover({ key: "dmg", pi, si })}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+              {(() => {
+                const h = hovered("dmg");
+                if (!h) return null;
+                const d = timeline.damage![h.pi][h.si];
+                return (
+                  <div className="hm-tip hm-tip-below" style={tipStyle(h.pi, d)}>
+                    <div className="hm-tip-title">Raid damage</div>
+                    <div>
+                      <span className="hm-mono">{fightRange(phases[h.pi], d)}</span> into the fight
+                    </div>
+                    {!single && (
+                      <div>
+                        <span className="hm-mono">{phaseRange(phases[h.pi], d)}</span> since the phase change
+                      </div>
+                    )}
+                    <div className="hm-tip-rule">
+                      {d.ratio === null ? <div className="hm-tip-muted">No damage stored for this slice</div> : <DamageLines d={d} />}
+                    </div>
+                    <div className="hm-tip-rule">
+                      <PressedList timeline={timeline} pi={h.pi} si={h.si} />
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        )}
 
         <div className="hm-row hm-all">
           <div className="hm-label">
@@ -175,6 +295,7 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
                         slice={row.phases[h.pi][h.si]}
                         killCount={timeline.killCount}
                         single={single}
+                        damage={timeline.damage?.[h.pi][h.si]}
                         style={tipStyle(h.pi, row.phases[h.pi][h.si])}
                       />
                     )}
@@ -200,7 +321,24 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
   );
 }
 
-function SliceTip(props: { row: TimelineRow; phase: TimelinePhase; slice: HeatSlice; killCount: number; single: boolean; style: React.CSSProperties }) {
+function DamageBar({ d, max, on, onEnter }: { d: DamageSlice; max: number; on: boolean; onEnter: () => void }) {
+  const h = d.ratio === null ? 0 : d.ratio / max;
+  return (
+    <div className={`hm-bar${on ? " hm-bar-on" : ""}`} style={{ flexGrow: d.endMs - d.startMs }} onMouseEnter={onEnter}>
+      <span style={{ height: `${Math.max(h > 0 ? 4 : 0, h * 100)}%`, opacity: 0.35 + 0.65 * h }} />
+    </div>
+  );
+}
+
+function SliceTip(props: {
+  row: TimelineRow;
+  phase: TimelinePhase;
+  slice: HeatSlice;
+  killCount: number;
+  single: boolean;
+  damage: DamageSlice | undefined;
+  style: React.CSSProperties;
+}) {
   const { row, phase, slice } = props;
   const common = mostCommon(row, phase, slice, props.single);
   return (
@@ -225,6 +363,7 @@ function SliceTip(props: { row: TimelineRow; phase: TimelinePhase; slice: HeatSl
           Most common: <span className="hm-mono hm-tip-strong">{common}</span>
         </div>
       )}
+      <DamageNote d={props.damage} />
     </div>
   );
 }
@@ -257,7 +396,8 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
   const views = phoneViews(phases);
   const [vi, setVi] = useState(0);
   const [spec, setSpec] = useState<string | null>(null);
-  const [picked, setPicked] = useState<{ spellId: number; si: number } | null>(null);
+  // spellId null is the raid damage row.
+  const [picked, setPicked] = useState<{ spellId: number | null; si: number } | null>(null);
   const view = views[vi];
   const phase = phases[view.pi];
   const single = phases.length === 1;
@@ -265,11 +405,12 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
   const maxAll = Math.max(...timeline.all.flat().map((s) => s.perKill), 0.0001);
   const healerGroups = timeline.groups.filter((g) => g.count > 0);
   const shown = timeline.groups.filter((g) => g.count === 0 || spec === null || g.label === spec);
-  const pickedRow = picked && timeline.groups.flatMap((g) => g.rows).find((r) => r.spellId === picked.spellId);
+  const pickedRow = picked && picked.spellId !== null && timeline.groups.flatMap((g) => g.rows).find((r) => r.spellId === picked.spellId);
+  const pickedDamage = picked && picked.spellId === null ? timeline.damage?.[view.pi][picked.si] : undefined;
   const pickedGroup = pickedRow && timeline.groups.find((g) => g.rows.includes(pickedRow));
 
   return (
-    <div className={`hm-phone${pickedRow ? " hm-sheet-open" : ""}`}>
+    <div className={`hm-phone${pickedRow || pickedDamage ? " hm-sheet-open" : ""}`}>
       {views.length > 1 && (
         <>
           <div className="hm-tabs" role="tablist" aria-label={single ? "Part of the fight" : "Phase"}>
@@ -347,6 +488,33 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
           ))}
         </div>
         <div className="muted hm-small">{single ? "Fight time" : `Time since phase ${phase.id} started`}</div>
+        {timeline.damage && (
+          <div className="hm-phone-row hm-phone-dmg">
+            <div className="hm-phone-name">
+              <strong>Raid damage</strong>
+            </div>
+            <div className="hm-phone-bars">
+              {timeline.damage[view.pi]
+                .map((d, si) => ({ d, si }))
+                .filter(({ d }) => inView(d))
+                .map(({ d, si }) => {
+                  const h = d.ratio === null ? 0 : d.ratio / maxRatio(timeline.damage!);
+                  return (
+                    <button
+                      key={si}
+                      type="button"
+                      className={picked?.spellId === null && picked.si === si ? "hm-bar-on" : ""}
+                      style={{ flexGrow: d.endMs - d.startMs }}
+                      aria-label={`Raid damage, ${formatTime(d.startMs)} into ${single ? "the fight" : `phase ${phase.id}`}${d.ratio === null ? "" : `, ${ratioText(d.ratio)} average`}`}
+                      onClick={() => setPicked({ spellId: null, si })}
+                    >
+                      <span style={{ height: `${Math.max(h > 0 ? 4 : 0, h * 100)}%`, opacity: 0.35 + 0.65 * h }} />
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        )}
         {shown.map((g, gi) => (
           <div key={g.label} className={gi > 0 && g.count === 0 && shown[gi - 1].count > 0 ? "hm-raid-start" : ""}>
             <div className="hm-group">
@@ -382,7 +550,7 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
           </div>
         ))}
       </div>
-      <Legend hint="Tap a slice for details" phased={!single} />
+      <Legend hint="Tap a slice for details" phased={!single} damage={!!timeline.damage} />
 
       {pickedRow && pickedGroup && picked && (
         <PhoneSheet
@@ -392,41 +560,78 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
           slice={pickedRow.phases[view.pi][picked.si]}
           killCount={timeline.killCount}
           single={single}
+          damage={timeline.damage?.[view.pi][picked.si]}
           onClose={() => setPicked(null)}
         />
+      )}
+      {pickedDamage && picked && (
+        <DamageSheet timeline={timeline} d={pickedDamage} pi={view.pi} si={picked.si} single={single} onClose={() => setPicked(null)} />
       )}
     </div>
   );
 }
 
-function PhoneSheet(props: { row: TimelineRow; group: string; phase: TimelinePhase; slice: HeatSlice; killCount: number; single: boolean; onClose: () => void }) {
+function SheetHead({ title, sub, onClose }: { title: string; sub?: string; onClose: () => void }) {
+  return (
+    <div className="hm-sheet-head">
+      <div>
+        <div className="hm-tip-title">{title}</div>
+        {sub && <div className="hm-tip-muted">{sub}</div>}
+      </div>
+      <button type="button" aria-label="Close details" onClick={onClose}>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+          <path d="M3 3l10 10M13 3L3 13" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+function SheetTimes({ phase, slice, single }: { phase: TimelinePhase; slice: { startMs: number; endMs: number }; single: boolean }) {
+  return (
+    <div className="hm-sheet-times">
+      <div>
+        <span className="hm-tip-muted">Into the fight</span>
+        <span className="hm-mono">{fightRange(phase, slice)}</span>
+      </div>
+      {!single && (
+        <div>
+          <span className="hm-tip-muted">Since phase change</span>
+          <span className="hm-mono">{phaseRange(phase, slice)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DamageSheet(props: { timeline: Timeline; d: DamageSlice; pi: number; si: number; single: boolean; onClose: () => void }) {
+  const { d } = props;
+  return (
+    <div className="hm-sheet" role="dialog" aria-label="Raid damage details">
+      <SheetHead title="Raid damage" onClose={props.onClose} />
+      <SheetTimes phase={props.timeline.phases[props.pi]} slice={d} single={props.single} />
+      {d.ratio === null ? <div className="hm-tip-muted">No damage stored for this slice</div> : <DamageLines d={d} />}
+      <PressedList timeline={props.timeline} pi={props.pi} si={props.si} />
+    </div>
+  );
+}
+
+function PhoneSheet(props: {
+  row: TimelineRow;
+  group: string;
+  phase: TimelinePhase;
+  slice: HeatSlice;
+  killCount: number;
+  single: boolean;
+  damage: DamageSlice | undefined;
+  onClose: () => void;
+}) {
   const { row, phase, slice } = props;
   const common = mostCommon(row, phase, slice, props.single);
   return (
     <div className="hm-sheet" role="dialog" aria-label={`${row.spellName} details`}>
-      <div className="hm-sheet-head">
-        <div>
-          <div className="hm-tip-title">{row.spellName}</div>
-          <div className="hm-tip-muted">{props.group}</div>
-        </div>
-        <button type="button" aria-label="Close details" onClick={props.onClose}>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-            <path d="M3 3l10 10M13 3L3 13" />
-          </svg>
-        </button>
-      </div>
-      <div className="hm-sheet-times">
-        <div>
-          <span className="hm-tip-muted">Into the fight</span>
-          <span className="hm-mono">{fightRange(phase, slice)}</span>
-        </div>
-        {!props.single && (
-          <div>
-            <span className="hm-tip-muted">Since phase change</span>
-            <span className="hm-mono">{phaseRange(phase, slice)}</span>
-          </div>
-        )}
-      </div>
+      <SheetHead title={row.spellName} sub={props.group} onClose={props.onClose} />
+      <SheetTimes phase={phase} slice={slice} single={props.single} />
       <div>
         Pressed around here in <strong>{Math.round(slice.share * 100)}%</strong> of kills{" "}
         <span className="hm-tip-muted">
@@ -438,6 +643,7 @@ function PhoneSheet(props: { row: TimelineRow; group: string; phase: TimelinePha
           Most common: <span className="hm-mono hm-tip-strong">{common}</span>
         </div>
       )}
+      <DamageNote d={props.damage} />
     </div>
   );
 }

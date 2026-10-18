@@ -27,6 +27,19 @@ describe.skipIf(!url)("db round trip", () => {
     expect(loaded).toMatchObject({ reportCode: k.reportCode, killIndex: 1, healers: k.healers, phases: k.phases });
     expect(loaded.killDate).toBe(k.killDate);
     expect(loaded.casts).toEqual(k.casts);
+    expect(loaded.damage).toBeNull();
+  });
+
+  it("saves damage and finds kills still missing it", async () => {
+    const damage = { bucketMs: 5_000, total: [10, 20], top: [[[1, 10]], [[1, 20]]] as [number, number][][], names: { 1: "Melee" } };
+    const k = kill({ encounterId: 998 });
+    await mod.saveKill(k);
+    expect((await mod.killsMissingDamage(100)).map((m) => m.reportCode)).toContain(k.reportCode);
+    await mod.saveDamage(k.reportCode, k.fightId, damage);
+    expect((await mod.killsMissingDamage(100)).map((m) => m.reportCode)).not.toContain(k.reportCode);
+    await mod.saveKill(k); // a re-crawl without damage keeps what's stored
+    const [loaded] = await mod.loadKills(998, "mythic");
+    expect(loaded.damage).toEqual(damage);
   });
 
   it("stores guild kill history", async () => {

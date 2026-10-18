@@ -60,6 +60,16 @@ export interface AllSlice {
   perKill: number;
 }
 
+/** Raid damage taken in one slice, averaged over the kills that have damage. */
+export interface DamageSlice {
+  startMs: number;
+  endMs: number;
+  /** Damage here against the fight's average, e.g. 2.8. null when no kill with damage covers the slice. */
+  ratio: number | null;
+  /** The ability behind the most damage here, and its share of the slice's damage. */
+  top: { name: string; share: number } | null;
+}
+
 export interface Timeline {
   phases: TimelinePhase[];
   totalMs: number;
@@ -67,6 +77,8 @@ export interface Timeline {
   killCount: number;
   groups: TimelineGroup[];
   all: AllSlice[][];
+  /** Slices per phase like `all`, or null when none of the kills have damage stored. */
+  damage: DamageSlice[][] | null;
 }
 
 const median = (xs: number[]) => {
@@ -100,6 +112,79 @@ const sliceBounds = (lengthMs: number, bucketMs: number) => {
     endMs: i === count - 1 ? lengthMs : (i + 1) * bucketMs,
   }));
 };
+
+/**
+ * Averages the raid's damage taken into the timeline's slices. Each kill is scaled to its own average first, so
+ * a kill counts for the shape of its damage rather than its raid's size or gear, then kills are combined by weight.
+ * Abilities are matched by name, since one boss ability can have different ids on Heroic and Mythic.
+ */
+function damageSlices(
+  kills: Plan["killsUsed"],
+  phaseIndex: Map<number, number>,
+  bounds: { startMs: number; endMs: number }[][],
+  bucketMs: number,
+): DamageSlice[][] | null {
+  const acc = bounds.map((b) => b.map(() => ({ weight: 0, value: 0, byName: new Map<string, number>() })));
+  let any = false;
+  for (const { kill, weight } of kills) {
+    const d = kill.damage;
+    if (!d || d.total.length === 0) continue;
+    const mean = d.total.reduce((a, b) => a + b, 0) / d.total.length;
+    if (!(mean > 0)) continue;
+    any = true;
+    // Second by second, so damage slices and timeline slices of different lengths line up.
+    const own = bounds.map((b) => b.map(() => ({ seconds: 0, value: 0, byName: new Map<string, number>() })));
+    const end = Math.min(kill.durationMs, d.total.length * d.bucketMs);
+    for (let t = 0; t < end; t += 1_000) {
+      const di = Math.floor(t / d.bucketMs);
+      const { phaseId, tPhaseMs } = toPhaseTime(t + 500, kill.phases);
+      const pi = phaseIndex.get(phaseId);
+      if (pi === undefined) continue;
+      const slot = own[pi][Math.min(bounds[pi].length - 1, Math.floor(tPhaseMs / bucketMs))];
+      slot.seconds++;
+      slot.value += d.total[di] / mean;
+      for (const [id, amount] of d.top[di] ?? []) {
+        const name = d.names[id] ?? `Ability ${id}`;
+        slot.byName.set(name, (slot.byName.get(name) ?? 0) + amount / mean);
+      }
+    }
+    own.forEach((slices, pi) =>
+      slices.forEach((slot, si) => {
+        if (slot.seconds === 0) return;
+        const a = acc[pi][si];
+        a.weight += weight;
+        a.value += (weight * slot.value) / slot.seconds;
+        for (const [name, v] of slot.byName) a.byName.set(name, (a.byName.get(name) ?? 0) + (weight * v) / slot.seconds);
+      }),
+    );
+  }
+  if (!any) return null;
+
+  // The fight's average, weighting each slice by its length.
+  let sum = 0;
+  let ms = 0;
+  acc.forEach((slices, pi) =>
+    slices.forEach((a, si) => {
+      if (a.weight === 0) return;
+      const len = bounds[pi][si].endMs - bounds[pi][si].startMs;
+      sum += (a.value / a.weight) * len;
+      ms += len;
+    }),
+  );
+  const avg = ms > 0 ? sum / ms : 0;
+
+  return acc.map((slices, pi) =>
+    slices.map((a, si) => {
+      if (a.weight === 0 || avg <= 0) return { ...bounds[pi][si], ratio: null, top: null };
+      const best = [...a.byName].sort((x, y) => y[1] - x[1])[0];
+      return {
+        ...bounds[pi][si],
+        ratio: a.value / a.weight / avg,
+        top: best && a.value > 0 ? { name: best[0], share: Math.min(1, best[1] / a.value) } : null,
+      };
+    }),
+  );
+}
 
 /**
  * Lays a plan out on one fight-long axis, phases end to end at their typical
@@ -191,6 +276,7 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000, opts: Partial<HeatOp
     totalMs,
     bucketMs,
     killCount: kills.length,
+    damage: damageSlices(kills, phaseIndex, bounds, bucketMs),
     groups: [...groups.values()]
       .sort((a, b) => a.order - b.order || a.label.localeCompare(b.label))
       .map(({ order: _, ...g }) => ({ ...g, rows: g.rows.sort((a, b) => a.spellName.localeCompare(b.spellName)) })),

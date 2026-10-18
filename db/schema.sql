@@ -58,3 +58,6 @@ CREATE TABLE IF NOT EXISTS encounters (
   name      text    NOT NULL,
   position  integer NOT NULL
 );
+
+-- Damage the raid took per slice of the fight (see KillDamage in src/lib/types.ts). NULL = not fetched yet.
+ALTER TABLE kills ADD COLUMN IF NOT EXISTS damage jsonb;

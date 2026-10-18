@@ -100,3 +100,36 @@ describe("buildTimeline", () => {
     expect(groups[2]).toMatchObject({ count: 0, rows: [{ spellName: "Rallying Cry" }] });
   });
 });
+
+describe("damage on the timeline", () => {
+  // 60s fights in 10s damage slices, with a spike in the third slice from one ability.
+  const damage = (spike: number) => ({
+    bucketMs: 10_000,
+    total: [10, 10, spike, 10, 10, 10],
+    top: [[[1, 10]], [[1, 10]], [[2, spike - 10], [1, 10]], [[1, 10]], [[1, 10]], [[1, 10]]] as [number, number][][],
+    names: { 1: "Melee", 2: "Big Slam" },
+  });
+  const plan = (kills: ReturnType<typeof kill>[]) => buildPlan(kills, kills[0].healers, { weight: { now: NOW } });
+
+  it("shows where the raid takes the most damage, against the fight's average, and what's behind it", () => {
+    const kills = [
+      kill({ durationMs: 60_000, phases: [], damage: damage(70) }),
+      kill({ durationMs: 60_000, phases: [], damage: damage(700) }),
+    ];
+    const t = buildTimeline(plan(kills), 10_000);
+    const slices = t.damage![0];
+    expect(slices).toHaveLength(6);
+    // Each kill counts for its own shape, so the big raid doesn't drown out the small one.
+    const spike = slices[2];
+    expect(spike.ratio).toBeGreaterThan(3);
+    expect(slices[0].ratio).toBeLessThan(1);
+    expect(spike.top?.name).toBe("Big Slam");
+    expect(spike.top!.share).toBeGreaterThan(0.8);
+    expect(slices[0].top).toEqual({ name: "Melee", share: 1 });
+  });
+
+  it("is null when no kill has damage stored", () => {
+    const kills = [kill({ durationMs: 60_000, phases: [] }), kill({ durationMs: 60_000, phases: [], damage: null })];
+    expect(buildTimeline(plan(kills), 10_000).damage).toBeNull();
+  });
+});

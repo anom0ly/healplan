@@ -45,7 +45,7 @@ export interface TimelineRow {
   spec: HealerSpec | null;
   /** The player's number within their spec, e.g. 2 for Druid #2; 1 for raid-wide cooldowns. */
   slot: number;
-  /** Kills this row is judged against: all of them for #1, kills with at least two of the spec for #2. */
+  /** Kills this row is judged against: kills with the spec for #1, kills with at least two of it for #2, all of them for raid-wide cooldowns. */
   killCount: number;
   /** Per phase, this row's kill weight against all the kill weight that reached the phase, for adding rows up. */
   reach: number[];
@@ -240,7 +240,7 @@ export function buildTimeline(
 
   // Kill weight that reached each phase, per pool of kills, so a phase only some kills saw isn't judged against all of them.
   const slots = assignSlots(kills);
-  const pools = compPools(plan.comp, slots, plan.anyComp);
+  const pools = compPools(plan.comp, slots);
   const reached = new Map(pools.map(({ pool }) => [pool, phases.map(() => 0)]));
   const poolKills = new Map(pools.map(({ pool }) => [pool, 0]));
   for (const { kill, weight } of kills) {
@@ -280,7 +280,7 @@ export function buildTimeline(
   const reachedAll = reached.get("")!;
   const rows: TimelineRow[] = [...pressed].map(([rowKey, { spellId, slot, slices: perPhase }]) => {
     const cd = COOLDOWN_BY_ID.get(spellId);
-    const pool = poolOf(cd?.spec ?? null, slot, plan.anyComp);
+    const pool = poolOf(cd?.spec ?? null, slot);
     const weightIn = reached.get(pool) ?? reachedAll;
     return {
       key: rowKey,

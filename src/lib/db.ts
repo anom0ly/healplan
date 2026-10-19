@@ -1,3 +1,4 @@
+import { cooldownId } from "@/data/cooldowns";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
@@ -68,7 +69,7 @@ export async function loadKills(encounterId: number, difficulty: Difficulty): Pr
   for (const c of casts.rows) {
     const key = `${c.report_code}#${c.fight_id}`;
     const list = byFight.get(key) ?? [];
-    list.push({ spellId: c.spell_id, source: c.source, sourceSpec: c.source_spec, timestampMs: c.timestamp_ms });
+    list.push({ spellId: cooldownId(c.spell_id), source: c.source, sourceSpec: c.source_spec, timestampMs: c.timestamp_ms });
     byFight.set(key, list);
   }
   return kills.rows.map((r) => ({

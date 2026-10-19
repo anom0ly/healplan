@@ -11,7 +11,7 @@ describe.skipIf(!url)("db round trip", () => {
     process.env.DATABASE_URL = url;
     mod = await import("@/lib/db");
     await mod.migrate();
-    await mod.db().query("TRUNCATE kills, casts, guild_kill_history, crawl_pages, encounters");
+    await mod.db().query("TRUNCATE kills, casts, guild_kill_history, crawl_pages, encounters, user_reports CASCADE");
   });
 
   afterAll(async () => {
@@ -91,5 +91,20 @@ describe.skipIf(!url)("db round trip", () => {
       { healers: ["RestorationDruid", "HolyPaladin"], kills: 2, firstKills: 1 },
       { healers: ["MistweaverMonk"], kills: 1, firstKills: 1 },
     ]);
+  });
+
+  it("stores pasted reports and their pulls, and deletes ones nobody has fetched in two weeks", async () => {
+    const fight = { id: 3, encounterId: 999, difficulty: "mythic" as const, kill: false, durationMs: 90_000, bossPercent: 61.5, phases: [], startTime: 1_000, endTime: 91_000 };
+    await mod.saveUserReport("OLDREPORT", "Old night", [fight]);
+    await mod.saveUserReport("NEWREPORT", "New night", [fight]);
+    await mod.saveUserPull("OLDREPORT", 3, { healers: [{ name: "Leafy", spec: "RestorationDruid" }], casts: [cast(740, 30_000, "Leafy")], damage: null });
+    expect((await mod.getUserReport("NEWREPORT"))?.fights).toEqual([fight]);
+    expect((await mod.getUserPulls("OLDREPORT", [3, 4])).get(3)?.casts).toEqual([cast(740, 30_000, "Leafy")]);
+
+    await mod.db().query("UPDATE user_reports SET fetched_at = now() - interval '15 days' WHERE report_code = 'OLDREPORT'");
+    expect(await mod.deleteOldUserReports(14)).toBe(1);
+    expect(await mod.getUserReport("OLDREPORT")).toBeNull();
+    expect((await mod.getUserPulls("OLDREPORT", [3])).size).toBe(0);
+    expect(await mod.getUserReport("NEWREPORT")).not.toBeNull();
   });
 });

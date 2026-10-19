@@ -65,7 +65,23 @@ export interface KillDamage {
   names: Record<number, string>;
 }
 
-export const killKey = (k: Pick<KillRecord, "reportCode" | "fightId">) => `${k.reportCode}#${k.fightId}`;
+/** One pull of a boss in a report someone pasted, wipes included. */
+export interface ReportPull {
+  fightId: number;
+  /** The pull's number among this boss's pulls in the report, from 1. */
+  number: number;
+  kill: boolean;
+  durationMs: number;
+  /** Boss health left when the pull ended, in percent; 0 on a kill. null when Warcraft Logs didn't say. */
+  bossPercent: number | null;
+  phases: Phase[];
+  healers: { name: string; spec: HealerSpec }[];
+  /** Cooldown presses by anyone in the raid. */
+  casts: CastEvent[];
+  damage: KillDamage | null;
+}
+
+export const killKey =(k: Pick<KillRecord, "reportCode" | "fightId">) => `${k.reportCode}#${k.fightId}`;
 
 /** The class each healer spec belongs to, for class colors. */
 export const SPEC_CLASS: Record<HealerSpec, string> = {

@@ -108,6 +108,31 @@ export async function reportPulls(wcl: WclClient, code: string, encounterId: num
   return { reportStart: r.startTime, fights: r.fights.filter((f) => f.difficulty === difficulty) };
 }
 
+export interface ReportFight extends BossFight {
+  encounterID: number;
+  difficulty: number | null;
+  /** Boss health left at the end of the pull, in percent. */
+  bossPercentage: number | null;
+}
+
+/** Every boss pull in a report, kills and wipes, with the report's title. Fight times are relative to the report start. */
+export async function reportBossFights(wcl: WclClient, code: string) {
+  const d = await wcl.query<{
+    reportData: { report: { title: string; startTime: number; fights: ReportFight[] } | null };
+  }>(
+    `query($code: String!) {
+      reportData { report(code: $code) {
+        title startTime
+        fights { id encounterID difficulty kill bossPercentage startTime endTime phaseTransitions { id startTime } }
+      } }
+    }`,
+    { code },
+  );
+  const r = d.reportData.report;
+  if (!r) throw new Error("report does not exist");
+  return { title: r.title, startTime: r.startTime, fights: r.fights.filter((f) => f.encounterID > 0) };
+}
+
 interface PlayerDetailsJson {
   data: { playerDetails: { healers: { id: number; name: string; type: string; specs?: { spec: string }[] }[] } };
 }

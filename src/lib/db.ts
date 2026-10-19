@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
 import { summarizeComps, type CompSummary } from "./engine/comp";
-import type { Difficulty, HealerSpec, KillDamage, KillRecord } from "./types";
+import type { Difficulty, HealerSpec, KillDamage, KillRecord, Phase, ReportPull } from "./types";
 
 let pool: pg.Pool | null = null;
 
@@ -237,4 +237,61 @@ export async function killsMissingDamage(limit: number) {
 
 export async function saveDamage(reportCode: string, fightId: number, damage: KillDamage) {
   await db().query("UPDATE kills SET damage = $3 WHERE report_code = $1 AND fight_id = $2", [reportCode, fightId, JSON.stringify(damage)]);
+}
+
+/** A boss pull in a pasted report, as listed by the report's fights. */
+export interface UserFight {
+  id: number;
+  encounterId: number;
+  difficulty: Difficulty;
+  kill: boolean;
+  durationMs: number;
+  bossPercent: number | null;
+  phases: Phase[];
+  /** Report time of the pull, for asking Warcraft Logs about its events. */
+  startTime: number;
+  endTime: number;
+}
+
+export interface UserReport {
+  code: string;
+  title: string;
+  fights: UserFight[];
+  fetchedAt: number;
+}
+
+export async function getUserReport(code: string): Promise<UserReport | null> {
+  const r = await db().query("SELECT title, fights, fetched_at FROM user_reports WHERE report_code = $1", [code]);
+  const row = r.rows[0];
+  return row ? { code, title: row.title, fights: row.fights, fetchedAt: new Date(row.fetched_at).getTime() } : null;
+}
+
+export async function saveUserReport(code: string, title: string, fights: UserFight[]) {
+  await db().query(
+    `INSERT INTO user_reports (report_code, title, fights) VALUES ($1, $2, $3)
+     ON CONFLICT (report_code) DO UPDATE SET title = EXCLUDED.title, fights = EXCLUDED.fights, fetched_at = now()`,
+    [code, title, JSON.stringify(fights)],
+  );
+}
+
+export type UserPullData = Pick<ReportPull, "healers" | "casts" | "damage">;
+
+/** Stored pulls of a pasted report, by fight id. */
+export async function getUserPulls(code: string, fightIds: number[]): Promise<Map<number, UserPullData>> {
+  const r = await db().query("SELECT fight_id, data FROM user_pulls WHERE report_code = $1 AND fight_id = ANY ($2)", [code, fightIds]);
+  return new Map(r.rows.map((row) => [row.fight_id as number, row.data as UserPullData]));
+}
+
+export async function saveUserPull(code: string, fightId: number, data: UserPullData) {
+  await db().query(
+    `INSERT INTO user_pulls (report_code, fight_id, data) VALUES ($1, $2, $3)
+     ON CONFLICT (report_code, fight_id) DO UPDATE SET data = EXCLUDED.data`,
+    [code, fightId, JSON.stringify(data)],
+  );
+}
+
+/** Deletes pasted reports, and their pulls, that nobody has fetched for this many days. */
+export async function deleteOldUserReports(days: number): Promise<number> {
+  const r = await db().query("DELETE FROM user_reports WHERE fetched_at < now() - make_interval(days => $1)", [days]);
+  return r.rowCount ?? 0;
 }

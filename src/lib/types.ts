@@ -67,6 +67,17 @@ export interface KillDamage {
 
 export const killKey = (k: Pick<KillRecord, "reportCode" | "fightId">) => `${k.reportCode}#${k.fightId}`;
 
+/** The class each healer spec belongs to, for class colors. */
+export const SPEC_CLASS: Record<HealerSpec, string> = {
+  RestorationDruid: "Druid",
+  HolyPaladin: "Paladin",
+  DisciplinePriest: "Priest",
+  HolyPriest: "Priest",
+  RestorationShaman: "Shaman",
+  MistweaverMonk: "Monk",
+  PreservationEvoker: "Evoker",
+};
+
 /** Short names for healer specs, as raiders say them. */
 export const SPEC_LABEL: Record<HealerSpec, string> = {
   RestorationDruid: "Resto Druid",

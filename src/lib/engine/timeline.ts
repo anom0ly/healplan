@@ -1,5 +1,5 @@
 import { COOLDOWN_BY_ID, cooldownsForComp } from "@/data/cooldowns";
-import { HEALER_SPECS, SPEC_LABEL, killKey, type HealerSpec, type KillRecord } from "@/lib/types";
+import { HEALER_SPECS, SPEC_CLASS, SPEC_LABEL, killKey, type HealerSpec, type KillRecord } from "@/lib/types";
 import { toPhaseTime } from "./cluster";
 import type { Plan } from "./plan";
 
@@ -48,6 +48,8 @@ export interface TimelineRow {
 /** The cooldowns one class or healer spec brings, e.g. "Resto Druid" or "Warrior". */
 export interface TimelineGroup {
   label: string;
+  /** The class that brings these cooldowns, e.g. "Druid", for its class color. */
+  wowClass: string;
   /** How many of this healer spec are in the comp; 0 for raid-wide cooldowns from other classes. */
   count: number;
   rows: TimelineRow[];
@@ -66,8 +68,8 @@ export interface DamageSlice {
   endMs: number;
   /** Damage here against the fight's average, e.g. 2.8. null when no kill with damage covers the slice. */
   ratio: number | null;
-  /** The ability behind the most damage here, and its share of the slice's damage. */
-  top: { name: string; share: number } | null;
+  /** The ability behind the most damage here, one of its spell ids, and its share of the slice's damage. */
+  top: { id: number; name: string; share: number } | null;
 }
 
 export interface Timeline {
@@ -125,6 +127,8 @@ function damageSlices(
   bucketMs: number,
 ): DamageSlice[][] | null {
   const acc = bounds.map((b) => b.map(() => ({ weight: 0, value: 0, byName: new Map<string, number>() })));
+  // One id per ability name, for linking it.
+  const ids = new Map<string, number>();
   let any = false;
   for (const { kill, weight } of kills) {
     const d = kill.damage;
@@ -145,6 +149,7 @@ function damageSlices(
       slot.value += d.total[di] / mean;
       for (const [id, amount] of d.top[di] ?? []) {
         const name = d.names[id] ?? `Ability ${id}`;
+        if (!ids.has(name)) ids.set(name, id);
         slot.byName.set(name, (slot.byName.get(name) ?? 0) + amount / mean);
       }
     }
@@ -180,7 +185,7 @@ function damageSlices(
       return {
         ...bounds[pi][si],
         ratio: a.value / a.weight / avg,
-        top: best && a.value > 0 ? { name: best[0], share: Math.min(1, best[1] / a.value) } : null,
+        top: best && a.value > 0 ? { id: ids.get(best[0])!, name: best[0], share: Math.min(1, best[1] / a.value) } : null,
       };
     }),
   );
@@ -263,10 +268,12 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000, opts: Partial<HeatOp
   // One group per healer spec in comp order, then raid-wide cooldowns by the class that casts them.
   const groups = new Map<string, TimelineGroup & { order: number }>();
   for (const row of rows) {
-    const label = row.spec ? SPEC_LABEL[row.spec] : (COOLDOWN_BY_ID.get(row.spellId)?.className ?? "Other");
+    const className = COOLDOWN_BY_ID.get(row.spellId)?.className ?? "Other";
+    const label = row.spec ? SPEC_LABEL[row.spec] : className;
+    const wowClass = row.spec ? SPEC_CLASS[row.spec] : className;
     const order = row.spec ? HEALER_SPECS.indexOf(row.spec) : HEALER_SPECS.length;
     const count = row.spec ? plan.comp.filter((s) => s === row.spec).length : 0;
-    const group = groups.get(label) ?? { label, count, rows: [], order };
+    const group = groups.get(label) ?? { label, wowClass, count, rows: [], order };
     group.rows.push(row);
     groups.set(label, group);
   }

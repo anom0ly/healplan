@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatTime } from "@/lib/engine/note";
-import type { DamageSlice, HeatSlice, Timeline, TimelineGroup, TimelinePhase, TimelineRow } from "@/lib/engine/timeline";
+import { hideSpecs, type DamageSlice, type HeatSlice, type Timeline, type TimelineGroup, type TimelinePhase, type TimelineRow } from "@/lib/engine/timeline";
+import { HEALER_SPECS, type HealerSpec } from "@/lib/types";
+import { SHOWN_SPECS_EVENT } from "./shown-specs";
 
 /** Heat level 0 to 4 for a value in [0, 1], such as a slice's share against its row's busiest slice. */
 const level = (share: number) => (share <= 0 ? 0 : share < 0.15 ? 1 : share < 0.35 ? 2 : share < 0.6 ? 3 : 4);
@@ -47,6 +49,48 @@ function SlotBadge({ group }: { group: TimelineGroup }) {
     <span className="hm-slot" title={title}>
       #{group.slot}
     </span>
+  );
+}
+
+/** Width of the dashed box marking where every comp presses a cooldown. */
+const EVERY_BOX_MS = 12_000;
+
+/** Fight times of some presses, e.g. "0:40 · 3:30". */
+function pressTimes(presses: { phaseId: number; tPhaseMs: number }[], phases: TimelinePhase[]) {
+  return presses
+    .map((p) => phases.find((ph) => ph.id === p.phaseId))
+    .map((ph, i) => (ph ? formatTime(ph.startMs + presses[i].tPhaseMs) : null))
+    .filter((t): t is string => t !== null)
+    .join(" · ");
+}
+
+/** A "comp" tag on a cooldown your comp presses somewhere else than every comp, with both times in its tooltip. */
+function ShiftTag({ row, phases }: { row: TimelineRow; phases: TimelinePhase[] }) {
+  if (!row.shift) return null;
+  return (
+    <span className="hm-shift" tabIndex={0} aria-label={`${row.spellName} is pressed at a different time in your comp`}>
+      comp
+      <span className="hm-shift-card" role="tooltip">
+        <span className="hm-tip-title">{row.spellName} moves with your comp</span>
+        <span className="hm-shift-times">
+          <span className="hm-tip-muted">Your comp</span>
+          <span className="hm-mono">{pressTimes(row.shift.yours, phases) || "Rarely pressed"}</span>
+          <span className="hm-tip-muted">Every comp</span>
+          <span className="hm-mono">{pressTimes(row.shift.every, phases)}</span>
+        </span>
+        <span className="hm-tip-muted">Dashed boxes show where most guilds press it.</span>
+      </span>
+    </span>
+  );
+}
+
+/** One line for cooldown tooltips: when every comp presses it, for a cooldown your comp presses elsewhere. */
+function EveryCompNote({ row, phases }: { row: TimelineRow; phases: TimelinePhase[] }) {
+  if (!row.shift) return null;
+  return (
+    <div className="hm-tip-muted">
+      Every comp: <span className="hm-mono hm-tip-strong">{pressTimes(row.shift.every, phases)}</span>
+    </div>
   );
 }
 
@@ -131,7 +175,7 @@ function ticks(totalMs: number, fromMs = 0) {
   return out.map((t) => ({ t, pct: (t / totalMs) * 100, label: formatTime(fromMs + t) }));
 }
 
-function Legend({ hint, phased, damage }: { hint: string; phased: boolean; damage: boolean }) {
+function Legend({ hint, phased, damage, every }: { hint: string; phased: boolean; damage: boolean; every: boolean }) {
   return (
     <div className="hm-legend">
       <span>Less often</span>
@@ -151,6 +195,11 @@ function Legend({ hint, phased, damage }: { hint: string; phased: boolean; damag
           <span className="hm-dotted" aria-hidden="true" /> Phase change
         </span>
       )}
+      {every && (
+        <span className="hm-legend-phase">
+          <span className="hm-every-swatch" aria-hidden="true" /> Every comp
+        </span>
+      )}
       <span className="hm-hint">{hint}</span>
     </div>
   );
@@ -162,11 +211,28 @@ function rowShade(row: TimelineRow) {
   return (share: number) => level(share / max);
 }
 
-export function Heatmap({ desktop, phone }: { desktop: Timeline; phone: Timeline }) {
+const hasShifts = (t: Timeline) => t.groups.some((g) => g.rows.some((r) => r.shift));
+
+/**
+ * `hidden` healer specs are left out. With `live` (any comp), the picker turns specs on and off in place.
+ */
+export function Heatmap({ desktop, phone, hidden = [], live = false }: { desktop: Timeline; phone: Timeline; hidden?: HealerSpec[]; live?: boolean }) {
+  const [off, setOff] = useState(hidden);
+  useEffect(() => {
+    if (!live) return;
+    const onShown = (e: Event) => {
+      const shown = (e as CustomEvent<HealerSpec[]>).detail;
+      setOff(HEALER_SPECS.filter((s) => !shown.includes(s)));
+    };
+    window.addEventListener(SHOWN_SPECS_EVENT, onShown);
+    return () => window.removeEventListener(SHOWN_SPECS_EVENT, onShown);
+  }, [live]);
+  const d = useMemo(() => hideSpecs(desktop, off), [desktop, off]);
+  const p = useMemo(() => hideSpecs(phone, off), [phone, off]);
   return (
     <section aria-label="Cooldown heat map">
-      <DesktopHeatmap timeline={desktop} />
-      <PhoneHeatmap timeline={phone} />
+      <DesktopHeatmap timeline={d} />
+      <PhoneHeatmap timeline={p} />
     </section>
   );
 }
@@ -233,7 +299,7 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
 
   return (
     <div className="hm-desktop">
-      <Legend hint="Hover a slice for details, click to keep it open" phased={!single} damage={!!timeline.damage} />
+      <Legend hint="Hover a slice for details, click to keep it open" phased={!single} damage={!!timeline.damage} every={hasShifts(timeline)} />
       <div className="hm-card">
         <div className="hm-row hm-head">
           <div />
@@ -347,9 +413,23 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
                 <div key={row.key} className="hm-row">
                   <div className="hm-label">
                     <SpellLink id={row.spellId} name={row.spellName} />
+                    <ShiftTag row={row} phases={phases} />
                   </div>
                   <div className="hm-track" onMouseLeave={() => setHover(null)}>
                     {strip(key, row.phases.map((slices) => slices.map((s) => ({ level: rowShade(row)(s.share) }))))}
+                    {row.shift?.every.map((e, i) => {
+                      const ph = phases.find((x) => x.id === e.phaseId);
+                      if (!ph) return null;
+                      const at = Math.min(ph.startMs + e.tPhaseMs, totalMs - EVERY_BOX_MS / 2);
+                      return (
+                        <span
+                          key={i}
+                          className="hm-every"
+                          aria-hidden="true"
+                          style={{ left: `${(Math.max(0, at - EVERY_BOX_MS / 2) / totalMs) * 100}%`, width: `${(EVERY_BOX_MS / totalMs) * 100}%` }}
+                        />
+                      );
+                    })}
                     {h && (
                       <SliceTip
                         row={row}
@@ -357,6 +437,7 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
                         slice={row.phases[h.pi][h.si]}
                         killCount={row.killCount}
                         single={single}
+                        phases={phases}
                         damage={timeline.damage?.[h.pi][h.si]}
                         style={tipStyle(h.pi, row.phases[h.pi][h.si])}
                         className={tipClass()}
@@ -400,6 +481,7 @@ function SliceTip(props: {
   slice: HeatSlice;
   killCount: number;
   single: boolean;
+  phases: TimelinePhase[];
   damage: DamageSlice | undefined;
   style: React.CSSProperties;
   className: string;
@@ -430,6 +512,7 @@ function SliceTip(props: {
           Most common: <span className="hm-mono hm-tip-strong">{common}</span>
         </div>
       )}
+      <EveryCompNote row={row} phases={props.phases} />
       <DamageNote d={props.damage} />
     </div>
   );
@@ -471,7 +554,9 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
   const inView = (s: { startMs: number }) => s.startMs >= view.fromMs && s.startMs < view.toMs;
   const maxAll = Math.max(...timeline.all.flat().map((s) => s.perKill), 0.0001);
   const healerGroups = timeline.groups.filter((g) => g.count > 0);
-  const shown = timeline.groups.filter((g) => g.count === 0 || spec === null || g.label === spec);
+  // A spec turned off in the picker can't stay picked here.
+  const only = spec !== null && healerGroups.some((g) => g.label === spec) ? spec : null;
+  const shown = timeline.groups.filter((g) => g.count === 0 || only === null || g.label === only);
   const pickedRow = picked && picked.rowKey !== null && timeline.groups.flatMap((g) => g.rows).find((r) => r.key === picked.rowKey);
   const pickedDamage = picked && picked.rowKey === null ? timeline.damage?.[view.pi][picked.si] : undefined;
   const pickedGroup = pickedRow && timeline.groups.find((g) => g.rows.includes(pickedRow));
@@ -533,8 +618,8 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
             <button
               key={label ?? "all"}
               type="button"
-              aria-pressed={spec === label}
-              className={spec === label ? "hm-chip-on" : ""}
+              aria-pressed={only === label}
+              className={only === label ? "hm-chip-on" : ""}
               onClick={() => {
                 setSpec(label);
                 setPicked(null);
@@ -600,6 +685,7 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
                   <div className="hm-phone-name">
                     <span>
                       <SpellLink id={row.spellId} name={row.spellName} />
+                      <ShiftTag row={row} phases={phases} />
                     </span>
                     {Math.max(...slices.map((s) => s.share)) < RARE && (
                       <span className="muted hm-small">{single ? "Rarely used here" : "Rarely used this phase"}</span>
@@ -616,6 +702,15 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
                         onClick={() => setPicked({ rowKey: row.key, si: s.si })}
                       />
                     ))}
+                    {row.shift?.every
+                      .filter((e) => e.phaseId === phase.id && e.tPhaseMs >= view.fromMs && e.tPhaseMs < view.toMs)
+                      .map((e, i) => {
+                        const span = view.toMs - view.fromMs;
+                        const left = Math.max(0, Math.min(e.tPhaseMs - view.fromMs - EVERY_BOX_MS / 2, span - EVERY_BOX_MS));
+                        return (
+                          <span key={i} className="hm-every" aria-hidden="true" style={{ left: `${(left / span) * 100}%`, width: `${(EVERY_BOX_MS / span) * 100}%` }} />
+                        );
+                      })}
                   </div>
                 </div>
               );
@@ -623,7 +718,7 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
           </div>
         ))}
       </div>
-      <Legend hint="Tap a slice for details" phased={!single} damage={!!timeline.damage} />
+      <Legend hint="Tap a slice for details" phased={!single} damage={!!timeline.damage} every={hasShifts(timeline)} />
 
       {pickedRow && pickedGroup && picked && (
         <PhoneSheet
@@ -633,6 +728,7 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
           slice={pickedRow.phases[view.pi][picked.si]}
           killCount={pickedRow.killCount}
           single={single}
+          phases={phases}
           damage={timeline.damage?.[view.pi][picked.si]}
           onClose={() => setPicked(null)}
         />
@@ -696,6 +792,7 @@ function PhoneSheet(props: {
   slice: HeatSlice;
   killCount: number;
   single: boolean;
+  phases: TimelinePhase[];
   damage: DamageSlice | undefined;
   onClose: () => void;
 }) {
@@ -716,6 +813,7 @@ function PhoneSheet(props: {
           Most common: <span className="hm-mono hm-tip-strong">{common}</span>
         </div>
       )}
+      <EveryCompNote row={row} phases={props.phases} />
       <DamageNote d={props.damage} />
     </div>
   );

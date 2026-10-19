@@ -2,7 +2,7 @@ import { listBosses, loadKills } from "@/lib/db";
 import { buildPlan, type Plan } from "@/lib/engine/plan";
 import { formatTime } from "@/lib/engine/note";
 import { parsePlanRequest } from "@/lib/request";
-import { SPEC_LABEL } from "@/lib/types";
+import { HEALER_SPECS, SPEC_LABEL } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +24,7 @@ export default async function Logs({ searchParams }: { searchParams: SearchParam
     try {
       plan = buildPlan(await loadKills(req.encounterId, req.difficulty), req.comp, {
         weight: { now: Date.now(), firstKillsOnly: req.firstKillsOnly },
+        anyComp: req.anyComp,
       });
     } catch (e) {
       error = (e as Error).message;
@@ -44,7 +45,7 @@ export default async function Logs({ searchParams }: { searchParams: SearchParam
       {req && (
         <p className="muted lg-sub">
           {boss?.name ?? `Encounter ${req.encounterId}`} · {req.difficulty === "heroic" ? "Heroic" : "Mythic"} ·{" "}
-          {req.comp.map((s) => SPEC_LABEL[s]).join(", ")}
+          {req.anyComp && req.comp.length === HEALER_SPECS.length ? "Any comp" : req.comp.map((s) => SPEC_LABEL[s]).join(req.anyComp ? " or " : ", ")}
         </p>
       )}
       {!req && <p>Pick a boss and healing comp first.</p>}

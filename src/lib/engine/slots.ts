@@ -78,15 +78,19 @@ export function assignSlots(kills: WeightedKill[]): Slots {
   };
 }
 
-/** Which kills a cooldown row is judged against: all of them for #1 and raid-wide cooldowns, kills with at least N of the spec for #N. */
-export const poolOf = (spec: HealerSpec | null, slot: number) => (spec && slot > 1 ? `${spec}#${slot}` : "");
+/**
+ * Which kills a cooldown row is judged against: all of them for #1 and raid-wide cooldowns, kills with at least N of the spec for #N.
+ * With `perSpec` (any comp), #1 is judged against kills with that spec too, since the kills don't share one comp.
+ */
+export const poolOf = (spec: HealerSpec | null, slot: number, perSpec = false) =>
+  spec && (slot > 1 || perSpec) ? `${spec}#${slot}` : "";
 
 /** Every pool a comp's rows use, with whether a kill belongs to it. */
-export function compPools(comp: HealerSpec[], slots: Slots): { pool: string; has: (kill: KillRecord) => boolean }[] {
+export function compPools(comp: HealerSpec[], slots: Slots, perSpec = false): { pool: string; has: (kill: KillRecord) => boolean }[] {
   const out: { pool: string; has: (kill: KillRecord) => boolean }[] = [{ pool: "", has: () => true }];
   for (const spec of new Set(comp)) {
     const count = comp.filter((s) => s === spec).length;
-    for (let n = 2; n <= count; n++) out.push({ pool: poolOf(spec, n), has: (kill) => slots.players(kill, spec) >= n });
+    for (let n = perSpec ? 1 : 2; n <= count; n++) out.push({ pool: poolOf(spec, n, perSpec), has: (kill) => slots.players(kill, spec) >= n });
   }
   return out;
 }

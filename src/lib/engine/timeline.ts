@@ -2,6 +2,7 @@ import { COOLDOWN_BY_ID, cooldownsForComp, pressedByItsSpec } from "@/data/coold
 import { HEALER_SPECS, SPEC_CLASS, SPEC_LABEL, killKey, type HealerSpec, type KillRecord } from "@/lib/types";
 import { toPhaseTime } from "./cluster";
 import type { Plan } from "./plan";
+import type { CompShift } from "./shift";
 import { assignSlots, compPools, poolOf } from "./slots";
 
 export interface TimelinePhase {
@@ -46,10 +47,14 @@ export interface TimelineRow {
   slot: number;
   /** Kills this row is judged against: all of them for #1, kills with at least two of the spec for #2. */
   killCount: number;
+  /** Per phase, this row's kill weight against all the kill weight that reached the phase, for adding rows up. */
+  reach: number[];
   /** Slices per phase, in the same order as `Timeline.phases`. */
   phases: HeatSlice[][];
   /** The consensus presses from the plan, used for "most common" times. */
   common: { phaseId: number; tPhaseMs: number }[];
+  /** Set when the comp presses this cooldown somewhere else than every comp does. */
+  shift: CompShift | null;
 }
 
 /** The cooldowns one class or healer spec brings, e.g. "Resto Druid" or "Warrior". */
@@ -58,6 +63,8 @@ export interface TimelineGroup {
   label: string;
   /** The spec or class alone, e.g. "Resto Druid". */
   name: string;
+  /** The healer spec, or null for raid-wide cooldowns from other classes. */
+  spec: HealerSpec | null;
   /** The player number when the comp has more than one of this spec, else null. */
   slot: number | null;
   /** The class that brings these cooldowns, e.g. "Druid", for its class color. */
@@ -208,7 +215,12 @@ function damageSlices(
  * length, and counts for every cooldown in the comp how much of the kill
  * weight pressed it in each slice of each phase.
  */
-export function buildTimeline(plan: Plan, bucketMs = 4_000, opts: Partial<HeatOptions> = {}): Timeline {
+export function buildTimeline(
+  plan: Plan,
+  bucketMs = 4_000,
+  opts: Partial<HeatOptions> = {},
+  shifts: Map<number, CompShift> = new Map(),
+): Timeline {
   const { floor, nearMs } = { ...DEFAULT_HEAT_OPTIONS, ...opts };
   const reach = Math.floor(nearMs / bucketMs);
   const kills = plan.killsUsed;
@@ -228,7 +240,7 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000, opts: Partial<HeatOp
 
   // Kill weight that reached each phase, per pool of kills, so a phase only some kills saw isn't judged against all of them.
   const slots = assignSlots(kills);
-  const pools = compPools(plan.comp, slots);
+  const pools = compPools(plan.comp, slots, plan.anyComp);
   const reached = new Map(pools.map(({ pool }) => [pool, phases.map(() => 0)]));
   const poolKills = new Map(pools.map(({ pool }) => [pool, 0]));
   for (const { kill, weight } of kills) {
@@ -266,12 +278,10 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000, opts: Partial<HeatOp
   }
 
   const reachedAll = reached.get("")!;
-  const rowReach = new Map<string, number[]>();
   const rows: TimelineRow[] = [...pressed].map(([rowKey, { spellId, slot, slices: perPhase }]) => {
     const cd = COOLDOWN_BY_ID.get(spellId);
-    const pool = poolOf(cd?.spec ?? null, slot);
+    const pool = poolOf(cd?.spec ?? null, slot, plan.anyComp);
     const weightIn = reached.get(pool) ?? reachedAll;
-    rowReach.set(rowKey, weightIn);
     return {
       key: rowKey,
       spellId,
@@ -279,6 +289,7 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000, opts: Partial<HeatOp
       spec: cd?.spec ?? null,
       slot,
       killCount: poolKills.get(pool) ?? kills.length,
+      reach: weightIn.map((w, pi) => (reachedAll[pi] > 0 ? w / reachedAll[pi] : 0)),
       phases: perPhase.map((slices, pi) =>
         slices.map((_, si) => {
           const byKill = new Map<string, number>();
@@ -293,19 +304,10 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000, opts: Partial<HeatOp
       common: plan.timings
         .filter((t) => t.spellId === spellId && t.slot === slot)
         .map((t) => ({ phaseId: t.phaseId, tPhaseMs: t.tPhaseMs })),
+      shift: slot === 1 && cd?.spec ? (shifts.get(spellId) ?? null) : null,
     };
   });
-
-  // A Druid #2 row's share is of kills with two druids, so scale it back to all kills before adding it up.
-  const all = bounds.map((slices, pi) =>
-    slices.map((b, si) => ({
-      ...b,
-      perKill: rows.reduce((sum, r) => {
-        const own = rowReach.get(r.key)![pi];
-        return sum + (reachedAll[pi] > 0 ? (r.phases[pi][si].share * own) / reachedAll[pi] : 0);
-      }, 0),
-    })),
-  );
+  const all = allSlices(bounds, rows);
 
   // One group per healer spec in comp order, one per player when the comp doubles a spec, then raid-wide cooldowns by the class that casts them.
   const groups = new Map<string, TimelineGroup & { order: number }>();
@@ -317,7 +319,7 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000, opts: Partial<HeatOp
     const slot = count > 1 ? row.slot : null;
     const label = slot === null ? name : `${name} #${slot}`;
     const order = (row.spec ? HEALER_SPECS.indexOf(row.spec) : HEALER_SPECS.length) * 10 + (slot ?? 0);
-    const group = groups.get(label) ?? { label, name, slot, wowClass, count, rows: [], order };
+    const group = groups.get(label) ?? { label, name, spec: row.spec, slot, wowClass, count, rows: [], order };
     group.rows.push(row);
     groups.set(label, group);
   }
@@ -333,4 +335,19 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000, opts: Partial<HeatOp
       .map(({ order: _, ...g }) => ({ ...g, rows: g.rows.sort((a, b) => a.spellName.localeCompare(b.spellName)) })),
     all,
   };
+}
+
+/** How many cooldowns get pressed per kill in each slice, over the given rows. */
+function allSlices(bounds: { startMs: number; endMs: number }[][], rows: TimelineRow[]): AllSlice[][] {
+  // A Druid #2 row's share is of kills with two druids, so scale it back to all kills before adding it up.
+  return bounds.map((slices, pi) =>
+    slices.map((b, si) => ({ ...b, perKill: rows.reduce((sum, r) => sum + r.phases[pi][si].share * r.reach[pi], 0) })),
+  );
+}
+
+/** The timeline with some healer specs' cooldowns left out, and the all-cooldowns row added up again without them. */
+export function hideSpecs(timeline: Timeline, hidden: HealerSpec[]): Timeline {
+  if (hidden.length === 0) return timeline;
+  const groups = timeline.groups.filter((g) => g.spec === null || !hidden.includes(g.spec));
+  return { ...timeline, groups, all: allSlices(timeline.all, groups.flatMap((g) => g.rows)) };
 }

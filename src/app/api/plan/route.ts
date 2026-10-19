@@ -9,7 +9,7 @@ export async function GET(req: Request) {
   const r = parsePlanRequest(params);
   if (!r) return Response.json({ error: "encounter and at least one healer spec are required" }, { status: 400 });
   const kills = await loadKills(r.encounterId, r.difficulty);
-  const plan = buildPlan(kills, r.comp, { weight: { now: Date.now(), firstKillsOnly: r.firstKillsOnly } });
+  const plan = buildPlan(kills, r.comp, { weight: { now: Date.now(), firstKillsOnly: r.firstKillsOnly }, anyComp: r.anyComp });
   return Response.json({
     ...plan,
     killsUsed: plan.killsUsed.map((k) => ({

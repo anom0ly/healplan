@@ -8,20 +8,22 @@ import { compOf, loadReport, parseReportLink, ReportError, type LoadedReport } f
 import { parseComp, parsePlanRequest } from "@/lib/request";
 import { HEALER_SPECS, type HealerSpec } from "@/lib/types";
 import { Heatmap } from "./heatmap";
-import { Picker } from "./picker";
+import { Badge, Picker } from "./picker";
 import { PullDetail, PullsOverview } from "./pulls";
 
 export const dynamic = "force-dynamic";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-type View = "guild" | "overview" | "pull";
+type Tab = "guild" | "compare";
+type View = "overview" | "pull";
 
 export default async function Home({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const val = (k: string) => (typeof params[k] === "string" ? (params[k] as string) : "");
 
-  // A pasted log: its pulls, and the boss and healers to fill in.
-  const pasted = val("log");
+  const tab: Tab = val("tab") === "compare" ? "compare" : "guild";
+  // A pasted log, read only on the compare tab: its pulls, and the boss and healers to fill in.
+  const pasted = tab === "compare" ? val("log") : "";
   const link = pasted ? parseReportLink(pasted) : null;
   let report: LoadedReport | null = null;
   let reportError: string | null = pasted && !link ? "That doesn't look like a Warcraft Logs report link." : null;
@@ -35,9 +37,10 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       reportError = e instanceof ReportError ? e.message : "Couldn't read that log. Try again in a minute.";
     }
   }
-  // A freshly pasted link fills in the boss and healers from the log, then the page keeps just the report code.
-  if (report && pasted !== report.code) {
-    const q = new URLSearchParams({ log: report.code, encounter: String(report.encounterId), difficulty: report.difficulty, view: "overview" });
+  // A freshly pasted link, or a pick of another boss in the log, fills in the boss and healers from the log, then the page keeps just the report code.
+  const stale = report && (pasted !== report.code || Number(val("encounter")) !== report.encounterId || val("difficulty") !== report.difficulty || parseComp(params).length === 0);
+  if (report && stale) {
+    const q = new URLSearchParams({ tab: "compare", log: report.code, encounter: String(report.encounterId), difficulty: report.difficulty });
     const comp = compOf(report.pulls);
     for (const spec of HEALER_SPECS) if (comp.includes(spec)) q.set(spec, String(comp.filter((s) => s === spec).length));
     redirect(`/?${q}`);
@@ -67,9 +70,10 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
   // Falls back to typing an encounter id when the boss list can't be read or the crawler hasn't saved it yet.
   const bosses: BossOption[] = await listBosses().catch(() => []);
 
-  const view: View = report && (val("view") === "pull" || val("view") === "overview") ? (val("view") as View) : report ? (val("view") === "guild" ? "guild" : "overview") : "guild";
-  const base = queryString(params, ["view", "pull"]);
-  const keep: Record<string, string> = report ? { log: report.code, view } : {};
+  const view: View = val("view") === "pull" ? "pull" : "overview";
+  const tabHref = (t: Tab) => `/?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(queryString(params, ["tab", "view", "pull"]))), tab: t })}`;
+  // The guild tab carries a pasted log along, so going back to compare keeps it.
+  const keep: Record<string, string> = val("log") ? { log: val("log") } : {};
 
   return (
     <main>
@@ -78,56 +82,121 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
         When guilds with your healing comp used their cooldowns, weighted toward first kills and recent kills.
       </p>
 
-      <form method="get" className="pv-paste">
-        <label className="pk-field pv-paste-field">
-          Check your pulls: paste a Warcraft Logs link
-          <input name="log" type="url" inputMode="url" placeholder="https://www.warcraftlogs.com/reports/…" defaultValue={report ? `https://www.warcraftlogs.com/reports/${report.code}` : pasted} />
-        </label>
-        <button type="submit">Check pulls</button>
-        {reportError && <p className="pv-error">{reportError}</p>}
-        {report && <p className="muted pv-paste-note">{report.title}</p>}
-      </form>
+      <nav className="pv-tabs pv-top" aria-label="Views">
+        {(
+          [
+            ["guild", "Guild timings"],
+            ["compare", "Compare your pulls"],
+          ] as const
+        ).map(([t, label]) => (
+          <a key={t} href={tabHref(t)} className={tab === t ? "pv-tab-on" : undefined} aria-current={tab === t ? "page" : undefined}>
+            {label}
+          </a>
+        ))}
+      </nav>
 
-      <Picker
-        bosses={bosses}
-        keep={keep}
-        initial={{
-          encounter: val("encounter"),
-          difficulty: val("difficulty") === "heroic" ? "heroic" : "mythic",
-          comp: parseComp(params),
-          firstKillsOnly: val("firstKillsOnly") === "1",
-          anyComp,
-        }}
-        live={anyComp && plan !== null}
-      />
+      {tab === "guild" && (
+        <>
+          <Picker
+            bosses={bosses}
+            keep={keep}
+            initial={{
+              encounter: val("encounter"),
+              difficulty: val("difficulty") === "heroic" ? "heroic" : "mythic",
+              comp: parseComp(params),
+              firstKillsOnly: val("firstKillsOnly") === "1",
+              anyComp,
+            }}
+            live={anyComp && plan !== null}
+          />
+          {error && <p>Couldn&apos;t load kills: {error}</p>}
+          {plan && (
+            <PlanView
+              plan={plan}
+              shifts={shifts}
+              hidden={anyComp ? HEALER_SPECS.filter((s) => !req!.comp.includes(s)) : []}
+              // Any comp's heat map is built from every kill, whichever specs are shown.
+              logsHref={`/logs?${queryString(params, anyComp ? [...HEALER_SPECS, "tab", "log"] : ["tab", "log"])}`}
+            />
+          )}
+        </>
+      )}
 
-      {error && <p>Couldn&apos;t load kills: {error}</p>}
-      {report && plan && !anyComp && (
-        <nav className="pv-tabs" aria-label="Views">
-          {(
-            [
-              ["guild", "Guild timings"],
-              ["overview", "Overview"],
-              ["pull", "Pull by pull"],
-            ] as const
-          ).map(([v, label]) => (
-            <a key={v} href={`/?${base}&view=${v}`} className={view === v ? "pv-tab-on" : undefined} aria-current={view === v ? "page" : undefined}>
-              {label}
-            </a>
-          ))}
-        </nav>
+      {tab === "compare" && !report && (
+        <form method="get" className="pv-paste">
+          <input type="hidden" name="tab" value="compare" />
+          <h2>See how your pulls line up with other guilds</h2>
+          <label className="pk-field pv-paste-field">
+            Warcraft Logs link
+            <input name="log" type="url" inputMode="url" placeholder="https://www.warcraftlogs.com/reports/…" defaultValue={pasted} />
+          </label>
+          <button type="submit">Compare pulls</button>
+          {reportError ? <p className="pv-error">{reportError}</p> : <p className="muted">Boss and healers are read from your log.</p>}
+        </form>
       )}
-      {plan && (view === "guild" || anyComp) && (
-        <PlanView
-          plan={plan}
-          shifts={shifts}
-          hidden={anyComp ? HEALER_SPECS.filter((s) => !req!.comp.includes(s)) : []}
-          // Any comp's heat map is built from every kill, whichever specs are shown.
-          logsHref={`/logs?${queryString(params, anyComp ? [...HEALER_SPECS] : [])}`}
-        />
+
+      {tab === "compare" && report && (
+        <>
+          <LogBar report={report} bosses={bosses} plan={plan} params={params} />
+          {error && <p>Couldn&apos;t load kills: {error}</p>}
+          {plan && (
+            <>
+              <nav className="pv-sub" aria-label="Compare views">
+                {(
+                  [
+                    ["overview", "Overview"],
+                    ["pull", "Pull by pull"],
+                  ] as const
+                ).map(([v, label]) => (
+                  <a key={v} href={`/?${queryString(params, ["view", "pull"])}&view=${v}`} className={view === v ? "pv-sub-on" : undefined} aria-current={view === v ? "page" : undefined}>
+                    {label}
+                  </a>
+                ))}
+              </nav>
+              <PullsView plan={plan} report={report} view={view} base={queryString(params, ["view", "pull"])} selected={Number(val("pull"))} />
+            </>
+          )}
+        </>
       )}
-      {plan && report && !anyComp && view !== "guild" && <PullsView plan={plan} report={report} view={view} base={base} selected={Number(val("pull"))} />}
     </main>
+  );
+}
+
+/** The pasted log at the top of the compare tab: which boss, how many pulls and the comp it's checked against. */
+function LogBar({ report, bosses, plan, params }: { report: LoadedReport; bosses: BossOption[]; plan: Plan | null; params: Record<string, string | string[] | undefined> }) {
+  const name = (id: number) => bosses.find((b) => b.id === id)?.name ?? `Boss ${id}`;
+  const diff = (d: string) => (d === "heroic" ? "Heroic" : "Mythic");
+  const others = report.bosses.filter((b) => b.encounterId !== report.encounterId || b.difficulty !== report.difficulty);
+  const bossHref = (b: { encounterId: number; difficulty: string }) => `/?${new URLSearchParams({ tab: "compare", log: report.code, encounter: String(b.encounterId), difficulty: b.difficulty })}`;
+  return (
+    <div className="pv-log">
+      <strong>{report.title}</strong>
+      <span className="muted">
+        {name(report.encounterId)} · {diff(report.difficulty)} · {report.pulls.length} {report.pulls.length === 1 ? "pull" : "pulls"}
+      </span>
+      <span className="pk-badges">
+        {compOf(report.pulls).map((s, i) => (
+          <Badge key={i} spec={s} />
+        ))}
+      </span>
+      {plan && <span className="muted pv-log-vs">vs {plan.killsUsed.length} guild kills with this comp</span>}
+      {others.length > 0 && (
+        <span className="pv-log-others">
+          Also in this log:{" "}
+          {others.map((b, i) => (
+            <span key={`${b.encounterId}-${b.difficulty}`}>
+              {i > 0 && ", "}
+              <a href={bossHref(b)}>
+                {name(b.encounterId)} {diff(b.difficulty)}
+              </a>
+            </span>
+          ))}
+        </span>
+      )}
+      <a className="pv-log-new" href={`/?${queryString(params, ["log", "view", "pull"])}`}>
+        Paste a different log
+      </a>
+    </div>
   );
 }
 
@@ -168,7 +237,7 @@ function PullsView({ plan, report, view, base, selected }: { plan: Plan; report:
   const req = plan.comp;
   const params = new URLSearchParams(base);
   if (Number(params.get("encounter")) !== report.encounterId || params.get("difficulty") !== report.difficulty) {
-    return <p className="muted">Your log has no pulls on this boss and difficulty. Pick the boss you pulled to compare.</p>;
+    return <p className="muted">Your log has no pulls on this boss and difficulty. Pick one of the bosses above to compare.</p>;
   }
   if (plan.killsUsed.length === 0) return <p>No matching kills to build a plan from yet. Try a looser comp or turn off first kills only.</p>;
   const comparison = comparePulls(plan.timings, req, report.pulls);

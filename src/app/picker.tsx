@@ -23,7 +23,7 @@ const BADGE: Record<HealerSpec, { abbr: string; bg: string; fg: string }> = {
 
 const sameComp = (a: HealerSpec[], b: HealerSpec[]) => sortComp(a).join() === sortComp(b).join();
 
-function Badge({ spec, className = "pk-badge" }: { spec: HealerSpec; className?: string }) {
+export function Badge({ spec, className = "pk-badge" }: { spec: HealerSpec; className?: string }) {
   const b = BADGE[spec];
   return (
     <span className={className} style={{ background: b.bg, color: b.fg }} title={SPEC_LABEL[spec]}>

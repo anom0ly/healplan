@@ -13,20 +13,14 @@ export const formatTime = (ms: number) => {
 
 /**
  * Exports timings as MRT-style timer lines: `{time:2:14,p2} Name Tranquility`.
- * When a spec has several players, its casts of each spell alternate between them.
+ * When a spec has several players, each line goes to the roster's player with the same number,
+ * so the first Resto Druid listed takes Druid #1's presses.
  */
 export function toNote(timings: PlannedTiming[], roster: RosterEntry[] = []): string {
-  const turn = new Map<string, number>();
   const lines: string[] = [];
   for (const t of timings) {
     const players = t.spec ? roster.filter((r) => r.spec === t.spec) : [];
-    let who = "";
-    if (players.length > 0) {
-      const key = `${t.spec}:${t.spellId}`;
-      const i = turn.get(key) ?? 0;
-      who = `${players[i % players.length].name} `;
-      turn.set(key, i + 1);
-    }
+    const who = players.length > 0 ? `${players[(t.slot - 1) % players.length].name} ` : "";
     const phase = t.phaseId > 1 ? `,p${t.phaseId}` : "";
     lines.push(`{time:${formatTime(t.tPhaseMs)}${phase}} ${who}${t.spellName}`);
   }

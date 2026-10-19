@@ -65,6 +65,7 @@ pre { background: var(--line); padding: 12px; border-radius: 8px; overflow-x: au
 .hm-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .hm-small { font-size: 11px; }
 .hm-kind { font-size: 12px; font-weight: 400; margin-left: 6px; }
+.hm-slot { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 700; line-height: 16px; color: var(--bg); background: rgb(var(--heat)); cursor: help; }
 
 .hm-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 16px 0 10px; font-size: 13px; color: var(--muted); }
 .hm-swatches { display: flex; gap: 2px; }

@@ -275,7 +275,7 @@ a.wh:hover { color: var(--accent); }
 }
 
 /* Your pulls: a pasted log against the plan. */
-.pv-paste { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; padding: 14px 16px; margin: 20px 0 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+.pv-paste { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; max-width: 640px; padding: 22px 24px; margin: 32px auto 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
 .pv-paste-field { flex: 1 1 320px; }
 .pv-paste-field input { width: 100%; min-width: 0; }
 .pv-paste button { padding: 10px 20px; border-radius: 8px; }
@@ -284,6 +284,17 @@ a.wh:hover { color: var(--accent); }
 .pv-tabs { display: flex; gap: 4px; margin: 8px 0 16px; border-bottom: 1px solid var(--line); overflow-x: auto; }
 .pv-tabs a { padding: 8px 14px; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
 .pv-tabs .pv-tab-on { color: var(--fg); font-weight: 600; border-bottom-color: var(--fg); }
+.pv-top { margin: 16px 0 20px; }
+.pv-paste h2 { flex-basis: 100%; margin: 0 0 4px; font-size: 18px; }
+.pv-log { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 14px; margin-bottom: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.pv-log .pk-badge { width: 26px; height: 26px; font-size: 10px; }
+.pv-log-vs, .pv-log-others, .pv-log-new { font-size: 13px; }
+.pv-log-others { color: var(--muted); }
+.pv-log a { color: var(--accent); }
+.pv-log-new { margin-left: auto; }
+.pv-sub { display: flex; gap: 6px; margin-bottom: 16px; }
+.pv-sub a { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); color: var(--fg); text-decoration: none; font-size: 14px; }
+.pv-sub .pv-sub-on { background: var(--fg); border-color: var(--fg); color: var(--bg); }
 
 .pv-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin-bottom: 12px; }
 .pv-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-left: auto; font-size: 13px; color: var(--muted); }

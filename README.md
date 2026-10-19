@@ -19,7 +19,7 @@ Mythic and Heroic are both supported.
    - **Clustering:** casts are measured from the start of their phase, grouped when within 8 seconds of each other, and kept when at least 40% of the weighted kills agree.
    - **Export:** MRT-style timer lines such as `{time:0:10,p2} Leafy Tranquility`.
 
-3. **Your pulls** (paste a report link at the top of the page) checks a guild's own pulls, wipes included, against the plan:
+3. **Your pulls** (the "Compare your pulls" tab: paste a report link) checks a guild's own pulls, wipes included, against the plan:
    - The log fills in the boss (the one the link points at, else the report's last boss) and the healers of the newest pull.
    - Each pull's healers, cooldown presses and damage taken are fetched once and kept in `user_reports` and `user_pulls`. The pull list is re-read at most once a minute, so a live log picks up new pulls. Pulls under 15 seconds are skipped, and pasted logs stop fetching when fewer than 3,000 of the hour's points are left, so the crawler keeps its share.
    - Pasted logs are deleted 14 days after they were last fetched (on each paste, and at the start of each crawl).

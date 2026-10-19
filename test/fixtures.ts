@@ -1,3 +1,4 @@
+import { COOLDOWN_BY_ID } from "@/data/cooldowns";
 import type { CastEvent, HealerSpec, KillRecord } from "@/lib/types";
 
 const DAY = 86_400_000;
@@ -27,9 +28,15 @@ export function kill(over: Partial<KillRecord> & { casts?: CastEvent[] } = {}): 
   };
 }
 
-export const cast = (spellId: number, timestampMs: number, source = "Healer"): CastEvent => ({
+/** A cast by a player of the cooldown's own spec, unless `sourceSpec` says otherwise. */
+export const cast = (
+  spellId: number,
+  timestampMs: number,
+  source = "Healer",
+  sourceSpec: HealerSpec | null = COOLDOWN_BY_ID.get(spellId)?.spec ?? null,
+): CastEvent => ({
   spellId,
   source,
-  sourceSpec: null,
+  sourceSpec,
   timestampMs,
 });

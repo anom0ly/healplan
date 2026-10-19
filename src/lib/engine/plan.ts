@@ -1,4 +1,4 @@
-import { COOLDOWN_BY_ID, cooldownsForComp } from "@/data/cooldowns";
+import { COOLDOWN_BY_ID, cooldownsForComp, pressedByItsSpec } from "@/data/cooldowns";
 import { killKey, type HealerSpec, type KillRecord } from "@/lib/types";
 import { clusterCasts, reachKey, toPhaseTime, DEFAULT_CLUSTER_OPTIONS, type ClusterOptions, type WeightedCast } from "./cluster";
 import { assignSlots, compPools, poolOf } from "./slots";
@@ -57,7 +57,7 @@ export function buildPlan(kills: KillRecord[], comp: HealerSpec[], opts: PlanOpt
 
     const lastBySource = new Map<string, number>();
     for (const c of [...kill.casts].sort((a, b) => a.timestampMs - b.timestampMs)) {
-      if (!spells.has(c.spellId)) continue;
+      if (!spells.has(c.spellId) || !pressedByItsSpec(c)) continue;
       const spec = COOLDOWN_BY_ID.get(c.spellId)?.spec ?? null;
       const slot = slots.of(kill, c);
       // A comp with one Resto Druid follows Druid #1 only; Druid #2's presses belong to comps with two.

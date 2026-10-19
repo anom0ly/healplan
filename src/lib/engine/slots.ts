@@ -1,4 +1,4 @@
-import { COOLDOWN_BY_ID } from "@/data/cooldowns";
+import { COOLDOWN_BY_ID, pressedByItsSpec } from "@/data/cooldowns";
 import { killKey, type CastEvent, type HealerSpec, type KillRecord } from "@/lib/types";
 import { toPhaseTime } from "./cluster";
 import type { WeightedKill } from "./weighting";
@@ -6,7 +6,7 @@ import type { WeightedKill } from "./weighting";
 /** A press this close to a reference press of the same spell, in the same phase, counts as matching it. */
 const MATCH_MS = 8_000;
 
-const specOf = (c: CastEvent) => COOLDOWN_BY_ID.get(c.spellId)?.spec ?? null;
+const specOf = (c: CastEvent) => (pressedByItsSpec(c) ? (COOLDOWN_BY_ID.get(c.spellId)?.spec ?? null) : null);
 
 /** Numbers the players of each healer spec in a kill, so two Resto Druids become Druid #1 and Druid #2. */
 export interface Slots {

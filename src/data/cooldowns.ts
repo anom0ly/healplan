@@ -56,5 +56,14 @@ export const COOLDOWNS: Cooldown[] = [
 
 export const COOLDOWN_BY_ID = new Map(COOLDOWNS.map((c) => [c.spellId, c]));
 
+/**
+ * Whether a cast counts as its cooldown. A healer cooldown counts only when a player of that healer spec pressed it,
+ * since Retribution Paladins also cast Avenging Wrath and every Evoker casts Zephyr.
+ */
+export const pressedByItsSpec = (c: { spellId: number; sourceSpec: HealerSpec | null }) => {
+  const spec = COOLDOWN_BY_ID.get(c.spellId)?.spec ?? null;
+  return spec === null || c.sourceSpec === spec;
+};
+
 export const cooldownsForComp = (comp: HealerSpec[], includeRaidWide = true) =>
   COOLDOWNS.filter((c) => (c.spec === null ? includeRaidWide : comp.includes(c.spec)));

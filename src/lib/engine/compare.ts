@@ -1,4 +1,4 @@
-import { COOLDOWN_BY_ID } from "@/data/cooldowns";
+import { COOLDOWN_BY_ID, pressedByItsSpec } from "@/data/cooldowns";
 import { SPEC_LABEL, type HealerSpec, type ReportPull } from "@/lib/types";
 import type { PlannedTiming } from "./plan";
 
@@ -101,7 +101,7 @@ function assignPlayers(timings: PlannedTiming[], pulls: ReportPull[], comp: Heal
     const presses = new Map<string, number>();
     for (const pull of pulls) {
       for (const h of pull.healers) if (h.spec === spec && !presses.has(h.name)) presses.set(h.name, 0);
-      for (const c of pull.casts) if (specOf(c.spellId) === spec) presses.set(c.source, (presses.get(c.source) ?? 0) + 1);
+      for (const c of pull.casts) if (specOf(c.spellId) === spec && pressedByItsSpec(c)) presses.set(c.source, (presses.get(c.source) ?? 0) + 1);
     }
     // The most active players, so the search stays small in a report with many swaps.
     const players = [...presses].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 5).map(([name]) => name);
@@ -163,7 +163,7 @@ export function comparePulls(timings: PlannedTiming[], comp: HealerSpec[], pulls
     for (const c of pull.casts) {
       const spec = specOf(c.spellId);
       const slot = slotOf.get(c.source);
-      if (!spec || slot === undefined || players.get(`${spec}#${slot}`) !== c.source) continue;
+      if (!spec || !pressedByItsSpec(c) || slot === undefined || players.get(`${spec}#${slot}`) !== c.source) continue;
       const key = `${c.spellId}#${slot}`;
       pressesOf.set(key, [...(pressesOf.get(key) ?? []), c.timestampMs]);
     }

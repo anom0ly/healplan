@@ -1,6 +1,5 @@
 import { listBosses, loadKills, type BossOption } from "@/lib/db";
 import { buildPlan, type Plan } from "@/lib/engine/plan";
-import { toNote } from "@/lib/engine/note";
 import { buildTimeline } from "@/lib/engine/timeline";
 import { parseComp, parsePlanRequest } from "@/lib/request";
 import { Heatmap } from "./heatmap";
@@ -70,8 +69,6 @@ function PlanView({ plan, logsHref }: { plan: Plan; logsHref: string }) {
         </a>
       </p>
       <Heatmap desktop={buildTimeline(plan, 4_000)} phone={buildTimeline(plan, 8_000)} />
-      <h2>Note</h2>
-      <pre>{toNote(plan.timings)}</pre>
     </section>
   );
 }

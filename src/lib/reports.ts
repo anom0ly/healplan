@@ -1,4 +1,4 @@
-import { COOLDOWNS } from "@/data/cooldowns";
+import { COOLDOWNS, cooldownId } from "@/data/cooldowns";
 import {
   deleteOldUserReports,
   getUserPulls,
@@ -189,6 +189,7 @@ export async function loadReport(
       bossPercent: f.bossPercent,
       phases: f.phases,
       ...stored.get(f.id)!,
+      casts: stored.get(f.id)!.casts.map((c) => ({ ...c, spellId: cooldownId(c.spellId) })),
     }));
   return { code: link.code, title: report.title, encounterId, difficulty, pulls, missing: numbered.length - pulls.length, bosses };
 }

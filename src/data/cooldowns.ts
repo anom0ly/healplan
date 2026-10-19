@@ -18,6 +18,8 @@ export interface Cooldown {
    * appears in crawled kills, and `npm run spells` lists what healers actually cast.
    */
   verified: boolean;
+  /** A talent choice that replaces another cooldown, counted as that one so its presses aren't split across two rows. */
+  sameAs?: number;
 }
 
 export const COOLDOWNS: Cooldown[] = [
@@ -40,10 +42,10 @@ export const COOLDOWNS: Cooldown[] = [
   { spellId: 108280, name: "Healing Tide Totem", spec: "RestorationShaman", kind: "healing", baseCooldownSec: 180, verified: true },
   { spellId: 114052, name: "Ascendance", spec: "RestorationShaman", kind: "throughput", baseCooldownSec: 180, verified: true },
   // Mistweaver Monk
-  { spellId: 115310, name: "Revival", spec: "MistweaverMonk", kind: "healing", baseCooldownSec: 180, verified: true },
-  { spellId: 388615, name: "Restoral", spec: "MistweaverMonk", kind: "healing", baseCooldownSec: 180, verified: true },
-  { spellId: 322118, name: "Invoke Yu'lon, the Jade Serpent", spec: "MistweaverMonk", kind: "throughput", baseCooldownSec: 120, verified: true },
-  { spellId: 325197, name: "Invoke Chi-Ji, the Red Crane", spec: "MistweaverMonk", kind: "throughput", baseCooldownSec: 120, verified: true },
+  { spellId: 115310, name: "Revival / Restoral", spec: "MistweaverMonk", kind: "healing", baseCooldownSec: 180, verified: true },
+  { spellId: 388615, name: "Restoral", spec: "MistweaverMonk", kind: "healing", baseCooldownSec: 180, verified: true, sameAs: 115310 },
+  { spellId: 322118, name: "Invoke Yu'lon / Chi-Ji", spec: "MistweaverMonk", kind: "throughput", baseCooldownSec: 120, verified: true },
+  { spellId: 325197, name: "Invoke Chi-Ji, the Red Crane", spec: "MistweaverMonk", kind: "throughput", baseCooldownSec: 120, verified: true, sameAs: 322118 },
   // Preservation Evoker
   { spellId: 363534, name: "Rewind", spec: "PreservationEvoker", kind: "healing", baseCooldownSec: 240, verified: true },
   { spellId: 359816, name: "Dream Flight", spec: "PreservationEvoker", kind: "healing", baseCooldownSec: 120, verified: true },
@@ -56,6 +58,9 @@ export const COOLDOWNS: Cooldown[] = [
 
 export const COOLDOWN_BY_ID = new Map(COOLDOWNS.map((c) => [c.spellId, c]));
 
+/** The spell id a cast counts as: the cooldown a talent choice replaces, else its own. */
+export const cooldownId = (spellId: number) => COOLDOWN_BY_ID.get(spellId)?.sameAs ?? spellId;
+
 /**
  * Whether a cast counts as its cooldown. A healer cooldown counts only when a player of that healer spec pressed it,
  * since Retribution Paladins also cast Avenging Wrath and every Evoker casts Zephyr.
@@ -66,4 +71,4 @@ export const pressedByItsSpec = (c: { spellId: number; sourceSpec: HealerSpec | 
 };
 
 export const cooldownsForComp = (comp: HealerSpec[], includeRaidWide = true) =>
-  COOLDOWNS.filter((c) => (c.spec === null ? includeRaidWide : comp.includes(c.spec)));
+  COOLDOWNS.filter((c) => c.sameAs === undefined && (c.spec === null ? includeRaidWide : comp.includes(c.spec)));

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { cooldownId, cooldownsForComp } from "@/data/cooldowns";
 import { buildPlan } from "@/lib/engine/plan";
 import { toNote } from "@/lib/engine/note";
 import { assignSlots } from "@/lib/engine/slots";
@@ -45,7 +46,7 @@ describe("a comp with two of a spec", () => {
     expect(t.groups[1]).toMatchObject({ name: "Resto Druid", slot: 2, count: 2 });
   });
 
-  it("judges #1 against every kill and #2 only against kills with two druids", () => {
+  it("judges #1 against kills with a druid and #2 only against kills with two", () => {
     const [one, two] = t.groups.map((g) => g.rows[0]);
     expect(one).toMatchObject({ key: "740#1", slot: 1, killCount: 5 });
     expect(two).toMatchObject({ key: "740#2", slot: 2, killCount: 2 });
@@ -87,3 +88,28 @@ describe("cooldowns other specs share", () => {
   });
 });
 
+
+describe("a spec only some matching kills have", () => {
+  it("judges its cooldowns against the kills that have it", () => {
+    const REVIVAL = 115310;
+    const withMonk: HealerSpec[] = ["RestorationDruid", "HolyPaladin", "RestorationShaman", "MistweaverMonk"];
+    // Close matches without a Monk outnumber the ones with one.
+    const mixed = [
+      ...[1, 2, 3, 4, 5].map(() => kill({ healers: ONE_DRUID, casts: [cast(TRANQ, 30_000)] })),
+      ...[1, 2].map(() => kill({ healers: withMonk, casts: [cast(TRANQ, 30_000), cast(REVIVAL, 50_000, "Monk")] })),
+    ];
+    const plan = buildPlan(mixed, withMonk, { weight: { now: NOW, minCompSimilarity: 0 } });
+    expect(plan.timings.find((t) => t.spellId === REVIVAL)).toMatchObject({ tPhaseMs: 50_000, support: 1 });
+    const row = buildTimeline(plan, 4_000, { floor: 0, nearMs: 0 }).groups.find((g) => g.spec === "MistweaverMonk")!.rows[0];
+    expect(row.killCount).toBe(2);
+  });
+});
+
+describe("talent choices", () => {
+  it("count Restoral as Revival and Chi-Ji as Yu'lon, with one row each", () => {
+    expect(cooldownId(388615)).toBe(115310);
+    expect(cooldownId(325197)).toBe(322118);
+    expect(cooldownId(740)).toBe(740);
+    expect(cooldownsForComp(["MistweaverMonk"], false).map((c) => c.spellId)).toEqual([115310, 322118]);
+  });
+});

@@ -46,7 +46,7 @@ export function buildPlan(kills: KillRecord[], comp: HealerSpec[], opts: PlanOpt
 
   const weighted = weighKills(kills, comp, weightOpts);
   const slots = assignSlots(weighted);
-  const pools = compPools(comp, slots, anyComp);
+  const pools = compPools(comp, slots);
 
   const phaseWeight = new Map<string, number>();
   const casts: WeightedCast[] = [];
@@ -68,7 +68,7 @@ export function buildPlan(kills: KillRecord[], comp: HealerSpec[], opts: PlanOpt
       // A comp with one Resto Druid follows Druid #1 only; Druid #2's presses belong to comps with two.
       const inComp = spec === null || slot <= comp.filter((s) => s === spec).length;
       if (inComp) {
-        casts.push({ spellId: c.spellId, ...toPhaseTime(c.timestampMs, kill.phases), killKey: key, weight, slot, pool: poolOf(spec, slot, anyComp) });
+        casts.push({ spellId: c.spellId, ...toPhaseTime(c.timestampMs, kill.phases), killKey: key, weight, slot, pool: poolOf(spec, slot) });
       }
       const srcKey = `${c.source}:${c.spellId}`;
       const prev = lastBySource.get(srcKey);

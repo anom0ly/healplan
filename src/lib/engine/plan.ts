@@ -1,12 +1,15 @@
 import { COOLDOWN_BY_ID, cooldownsForComp } from "@/data/cooldowns";
 import { killKey, type HealerSpec, type KillRecord } from "@/lib/types";
-import { clusterCasts, toPhaseTime, DEFAULT_CLUSTER_OPTIONS, type ClusterOptions, type WeightedCast } from "./cluster";
+import { clusterCasts, reachKey, toPhaseTime, DEFAULT_CLUSTER_OPTIONS, type ClusterOptions, type WeightedCast } from "./cluster";
+import { assignSlots, compPools, poolOf } from "./slots";
 import { weighKills, DEFAULT_WEIGHT_OPTIONS, type WeightOptions, type WeightedKill } from "./weighting";
 
 export interface PlannedTiming {
   spellId: number;
   spellName: string;
   spec: HealerSpec | null;
+  /** The player's number within their spec, e.g. 2 for Druid #2; 1 for raid-wide cooldowns. */
+  slot: number;
   phaseId: number;
   tPhaseMs: number;
   earliestMs: number;
@@ -37,20 +40,31 @@ export function buildPlan(kills: KillRecord[], comp: HealerSpec[], opts: PlanOpt
   const spells = new Set(cooldownsForComp(comp, opts.includeRaidWide ?? true).map((c) => c.spellId));
 
   const weighted = weighKills(kills, comp, weightOpts);
+  const slots = assignSlots(weighted);
+  const pools = compPools(comp, slots);
 
-  const phaseWeight = new Map<number, number>();
+  const phaseWeight = new Map<string, number>();
   const casts: WeightedCast[] = [];
   const recasts = new Map<number, number[]>();
 
   for (const { kill, weight } of weighted) {
     const key = killKey(kill);
     const phaseIds = new Set([1, ...kill.phases.map((p) => p.id)]);
-    for (const id of phaseIds) phaseWeight.set(id, (phaseWeight.get(id) ?? 0) + weight);
+    for (const { pool, has } of pools) {
+      if (!has(kill)) continue;
+      for (const id of phaseIds) phaseWeight.set(reachKey(pool, id), (phaseWeight.get(reachKey(pool, id)) ?? 0) + weight);
+    }
 
     const lastBySource = new Map<string, number>();
     for (const c of [...kill.casts].sort((a, b) => a.timestampMs - b.timestampMs)) {
       if (!spells.has(c.spellId)) continue;
-      casts.push({ spellId: c.spellId, ...toPhaseTime(c.timestampMs, kill.phases), killKey: key, weight });
+      const spec = COOLDOWN_BY_ID.get(c.spellId)?.spec ?? null;
+      const slot = slots.of(kill, c);
+      // A comp with one Resto Druid follows Druid #1 only; Druid #2's presses belong to comps with two.
+      const inComp = spec === null || slot <= comp.filter((s) => s === spec).length;
+      if (inComp) {
+        casts.push({ spellId: c.spellId, ...toPhaseTime(c.timestampMs, kill.phases), killKey: key, weight, slot, pool: poolOf(spec, slot) });
+      }
       const srcKey = `${c.source}:${c.spellId}`;
       const prev = lastBySource.get(srcKey);
       if (prev !== undefined) {

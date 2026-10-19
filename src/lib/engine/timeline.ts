@@ -2,6 +2,7 @@ import { COOLDOWN_BY_ID, cooldownsForComp } from "@/data/cooldowns";
 import { HEALER_SPECS, SPEC_CLASS, SPEC_LABEL, killKey, type HealerSpec, type KillRecord } from "@/lib/types";
 import { toPhaseTime } from "./cluster";
 import type { Plan } from "./plan";
+import { assignSlots, compPools, poolOf } from "./slots";
 
 export interface TimelinePhase {
   id: number;
@@ -36,9 +37,15 @@ export interface HeatOptions {
 export const DEFAULT_HEAT_OPTIONS: HeatOptions = { floor: 0.1, nearMs: 4_000 };
 
 export interface TimelineRow {
+  /** Unique per row: the spell id, plus the player number when a spec is doubled, e.g. "740#2". */
+  key: string;
   spellId: number;
   spellName: string;
   spec: HealerSpec | null;
+  /** The player's number within their spec, e.g. 2 for Druid #2; 1 for raid-wide cooldowns. */
+  slot: number;
+  /** Kills this row is judged against: all of them for #1, kills with at least two of the spec for #2. */
+  killCount: number;
   /** Slices per phase, in the same order as `Timeline.phases`. */
   phases: HeatSlice[][];
   /** The consensus presses from the plan, used for "most common" times. */
@@ -47,10 +54,15 @@ export interface TimelineRow {
 
 /** The cooldowns one class or healer spec brings, e.g. "Resto Druid" or "Warrior". */
 export interface TimelineGroup {
+  /** Unique per group, e.g. "Resto Druid #2". */
   label: string;
+  /** The spec or class alone, e.g. "Resto Druid". */
+  name: string;
+  /** The player number when the comp has more than one of this spec, else null. */
+  slot: number | null;
   /** The class that brings these cooldowns, e.g. "Druid", for its class color. */
   wowClass: string;
-  /** How many of this healer spec are in the comp; 0 for raid-wide cooldowns from other classes. */
+  /** How many of this healer spec are in the comp; 0 for raid-wide cooldowns from other classes. Each player gets a group. */
   count: number;
   rows: TimelineRow[];
 }
@@ -214,38 +226,59 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000, opts: Partial<HeatOp
   const phaseIndex = new Map(phases.map((p, i) => [p.id, i]));
   const bounds = phases.map((p) => sliceBounds(p.lengthMs, bucketMs));
 
-  // Kill weight that reached each phase, so a phase only some kills saw isn't judged against all of them.
-  const reached = phases.map(() => 0);
+  // Kill weight that reached each phase, per pool of kills, so a phase only some kills saw isn't judged against all of them.
+  const slots = assignSlots(kills);
+  const pools = compPools(plan.comp, slots);
+  const reached = new Map(pools.map(({ pool }) => [pool, phases.map(() => 0)]));
+  const poolKills = new Map(pools.map(({ pool }) => [pool, 0]));
   for (const { kill, weight } of kills) {
-    for (const id of new Set([1, ...kill.phases.map((p) => p.id)])) {
-      const i = phaseIndex.get(id);
-      if (i !== undefined) reached[i] += weight;
+    for (const { pool, has } of pools) {
+      if (!has(kill)) continue;
+      poolKills.set(pool, poolKills.get(pool)! + 1);
+      for (const id of new Set([1, ...kill.phases.map((p) => p.id)])) {
+        const i = phaseIndex.get(id);
+        if (i !== undefined) reached.get(pool)![i] += weight;
+      }
     }
   }
+  const compCount = (spec: HealerSpec) => plan.comp.filter((s) => s === spec).length;
 
-  // spellId -> phase -> slice -> kill key -> weight. A kill counts once per slice even if it pressed twice.
-  const pressed = new Map<number, Map<string, number>[][]>();
+  // Row key -> phase -> slice -> kill key -> weight. A kill counts once per slice even if it pressed twice.
+  const pressed = new Map<string, { spellId: number; slot: number; slices: Map<string, number>[][] }>();
   const spells = new Set(cooldownsForComp(plan.comp).map((c) => c.spellId));
   for (const { kill, weight } of kills) {
     const key = killKey(kill);
     for (const c of kill.casts) {
       if (!spells.has(c.spellId)) continue;
+      const spec = COOLDOWN_BY_ID.get(c.spellId)?.spec ?? null;
+      const slot = slots.of(kill, c);
+      if (spec !== null && slot > compCount(spec)) continue;
       const { phaseId, tPhaseMs } = toPhaseTime(c.timestampMs, kill.phases);
       const pi = phaseIndex.get(phaseId);
       if (pi === undefined) continue;
       // Presses past the typical phase length land in its last slice.
       const si = Math.min(bounds[pi].length - 1, Math.floor(tPhaseMs / bucketMs));
-      if (!pressed.has(c.spellId)) pressed.set(c.spellId, bounds.map((b) => b.map(() => new Map())));
-      pressed.get(c.spellId)![pi][si].set(key, weight);
+      // Only a doubled spec numbers its rows, so a single Resto Druid keeps the plain "740" key.
+      const rowKey = spec !== null && compCount(spec) > 1 ? `${c.spellId}#${slot}` : String(c.spellId);
+      if (!pressed.has(rowKey)) pressed.set(rowKey, { spellId: c.spellId, slot, slices: bounds.map((b) => b.map(() => new Map())) });
+      pressed.get(rowKey)!.slices[pi][si].set(key, weight);
     }
   }
 
-  const rows: TimelineRow[] = [...pressed].map(([spellId, perPhase]) => {
+  const reachedAll = reached.get("")!;
+  const rowReach = new Map<string, number[]>();
+  const rows: TimelineRow[] = [...pressed].map(([rowKey, { spellId, slot, slices: perPhase }]) => {
     const cd = COOLDOWN_BY_ID.get(spellId);
+    const pool = poolOf(cd?.spec ?? null, slot);
+    const weightIn = reached.get(pool) ?? reachedAll;
+    rowReach.set(rowKey, weightIn);
     return {
+      key: rowKey,
       spellId,
       spellName: cd?.name ?? `Spell ${spellId}`,
       spec: cd?.spec ?? null,
+      slot,
+      killCount: poolKills.get(pool) ?? kills.length,
       phases: perPhase.map((slices, pi) =>
         slices.map((_, si) => {
           const byKill = new Map<string, number>();
@@ -253,27 +286,38 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000, opts: Partial<HeatOp
             for (const [key, weight] of slices[k]) byKill.set(key, weight);
           }
           const w = [...byKill.values()].reduce((a, b) => a + b, 0);
-          const share = reached[pi] > 0 ? Math.min(1, w / reached[pi]) : 0;
+          const share = weightIn[pi] > 0 ? Math.min(1, w / weightIn[pi]) : 0;
           return share < floor ? { ...bounds[pi][si], share: 0, kills: 0 } : { ...bounds[pi][si], share, kills: byKill.size };
         }),
       ),
-      common: plan.timings.filter((t) => t.spellId === spellId).map((t) => ({ phaseId: t.phaseId, tPhaseMs: t.tPhaseMs })),
+      common: plan.timings
+        .filter((t) => t.spellId === spellId && t.slot === slot)
+        .map((t) => ({ phaseId: t.phaseId, tPhaseMs: t.tPhaseMs })),
     };
   });
 
+  // A Druid #2 row's share is of kills with two druids, so scale it back to all kills before adding it up.
   const all = bounds.map((slices, pi) =>
-    slices.map((b, si) => ({ ...b, perKill: rows.reduce((sum, r) => sum + r.phases[pi][si].share, 0) })),
+    slices.map((b, si) => ({
+      ...b,
+      perKill: rows.reduce((sum, r) => {
+        const own = rowReach.get(r.key)![pi];
+        return sum + (reachedAll[pi] > 0 ? (r.phases[pi][si].share * own) / reachedAll[pi] : 0);
+      }, 0),
+    })),
   );
 
-  // One group per healer spec in comp order, then raid-wide cooldowns by the class that casts them.
+  // One group per healer spec in comp order, one per player when the comp doubles a spec, then raid-wide cooldowns by the class that casts them.
   const groups = new Map<string, TimelineGroup & { order: number }>();
   for (const row of rows) {
     const className = COOLDOWN_BY_ID.get(row.spellId)?.className ?? "Other";
-    const label = row.spec ? SPEC_LABEL[row.spec] : className;
+    const name = row.spec ? SPEC_LABEL[row.spec] : className;
     const wowClass = row.spec ? SPEC_CLASS[row.spec] : className;
-    const order = row.spec ? HEALER_SPECS.indexOf(row.spec) : HEALER_SPECS.length;
-    const count = row.spec ? plan.comp.filter((s) => s === row.spec).length : 0;
-    const group = groups.get(label) ?? { label, wowClass, count, rows: [], order };
+    const count = row.spec ? compCount(row.spec) : 0;
+    const slot = count > 1 ? row.slot : null;
+    const label = slot === null ? name : `${name} #${slot}`;
+    const order = (row.spec ? HEALER_SPECS.indexOf(row.spec) : HEALER_SPECS.length) * 10 + (slot ?? 0);
+    const group = groups.get(label) ?? { label, name, slot, wowClass, count, rows: [], order };
     group.rows.push(row);
     groups.set(label, group);
   }

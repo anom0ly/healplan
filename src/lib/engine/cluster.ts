@@ -15,10 +15,18 @@ export interface WeightedCast {
   tPhaseMs: number;
   killKey: string;
   weight: number;
+  /** The player's number within their spec, e.g. 2 for Druid #2. Defaults to 1. */
+  slot?: number;
+  /** The kills this cast is judged against, from `poolOf`. Defaults to every kill. */
+  pool?: string;
 }
+
+/** Key for `clusterCasts`'s `phaseWeight`: one pool of kills in one phase. */
+export const reachKey = (pool: string, phaseId: number) => `${pool}|${phaseId}`;
 
 export interface Cluster {
   spellId: number;
+  slot: number;
   phaseId: number;
   /** Weighted median of the casts in the cluster. */
   tPhaseMs: number;
@@ -52,17 +60,18 @@ function weightedMedian(items: { t: number; w: number }[]): number {
  * Groups casts of the same spell in the same phase by time gaps, then keeps
  * groups that enough of the (weighted) kills agree on.
  *
- * `phaseWeight` maps phase id to the total weight of kills that reached that
- * phase, so a phase only some kills saw isn't judged against all of them.
+ * `phaseWeight` maps `reachKey(pool, phaseId)` to the total weight of the pool's
+ * kills that reached that phase, so a phase only some kills saw isn't judged
+ * against all of them. Each player number of a spec clusters on its own.
  */
 export function clusterCasts(
   casts: WeightedCast[],
-  phaseWeight: Map<number, number>,
+  phaseWeight: Map<string, number>,
   opts: ClusterOptions = DEFAULT_CLUSTER_OPTIONS,
 ): Cluster[] {
   const groups = new Map<string, WeightedCast[]>();
   for (const c of casts) {
-    const key = `${c.spellId}:${c.phaseId}`;
+    const key = `${c.spellId}:${c.slot ?? 1}:${c.phaseId}`;
     const g = groups.get(key);
     if (g) g.push(c);
     else groups.set(key, [c]);
@@ -78,11 +87,12 @@ export function clusterCasts(
       const perKill = new Map<string, number>();
       for (const c of run) perKill.set(c.killKey, Math.max(perKill.get(c.killKey) ?? 0, c.weight));
       const supported = [...perKill.values()].reduce((a, b) => a + b, 0);
-      const total = phaseWeight.get(run[0].phaseId) ?? 0;
+      const total = phaseWeight.get(reachKey(run[0].pool ?? "", run[0].phaseId)) ?? 0;
       const support = total > 0 ? Math.min(1, supported / total) : 0;
       if (support >= opts.minSupport) {
         out.push({
           spellId: run[0].spellId,
+          slot: run[0].slot ?? 1,
           phaseId: run[0].phaseId,
           tPhaseMs: weightedMedian(run.map((c) => ({ t: c.tPhaseMs, w: c.weight }))),
           earliestMs: run[0].tPhaseMs,

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatTime } from "@/lib/engine/note";
-import type { DamageSlice, HeatSlice, Timeline, TimelinePhase, TimelineRow } from "@/lib/engine/timeline";
+import type { DamageSlice, HeatSlice, Timeline, TimelineGroup, TimelinePhase, TimelineRow } from "@/lib/engine/timeline";
 
 /** Heat level 0 to 4 for a value in [0, 1], such as a slice's share against its row's busiest slice. */
 const level = (share: number) => (share <= 0 ? 0 : share < 0.15 ? 1 : share < 0.35 ? 2 : share < 0.6 ? 3 : 4);
@@ -36,6 +36,20 @@ function SpellLink({ id, name }: { id: number; name: string }) {
 /** CSS class that sets a group's heat color to its WoW class color. */
 const classTone = (wowClass: string) => `hm-c-${wowClass.toLowerCase().replace(/\s+/g, "-")}`;
 
+/** "#1" or "#2" when the comp has two of a spec, with how that player was picked in its tooltip. */
+function SlotBadge({ group }: { group: TimelineGroup }) {
+  if (group.slot === null) return null;
+  const title =
+    group.slot === 1
+      ? `The ${group.name} whose cooldowns line up with kills that had one ${group.name}`
+      : `The other ${group.name}, out of kills that had ${group.slot} or more`;
+  return (
+    <span className="hm-slot" title={title}>
+      #{group.slot}
+    </span>
+  );
+}
+
 /** Height of a damage bar, 0 to 1, against the slice that hurts most. */
 const maxRatio = (damage: DamageSlice[][]) => Math.max(...damage.flat().map((d) => d.ratio ?? 0), 0.0001);
 const ratioText = (r: number) => `${r < 10 ? r.toFixed(1) : Math.round(r)}×`;
@@ -44,7 +58,7 @@ const ratioText = (r: number) => `${r < 10 ? r.toFixed(1) : Math.round(r)}×`;
 function pressedHere(timeline: Timeline, pi: number, si: number, limit = 3) {
   return timeline.groups
     .flatMap((g) => g.rows)
-    .map((r) => ({ id: r.spellId, name: r.spellName, share: r.phases[pi][si].share }))
+    .map((r) => ({ key: r.key, id: r.spellId, name: r.key.includes("#") ? `${r.spellName} #${r.slot}` : r.spellName, share: r.phases[pi][si].share }))
     .filter((r) => r.share > 0)
     .sort((a, b) => b.share - a.share)
     .slice(0, limit);
@@ -99,7 +113,7 @@ function PressedList({ timeline, pi, si }: { timeline: Timeline; pi: number; si:
     <div>
       <div className="hm-tip-muted">Pressed here in</div>
       {list.map((r) => (
-        <div key={r.id} className="hm-pressed">
+        <div key={r.key} className="hm-pressed">
           <span>
             <SpellLink id={r.id} name={r.name} />
           </span>
@@ -320,17 +334,17 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
             <div className="hm-row">
               <div className="hm-group">
                 <span className="hm-dot" aria-hidden="true" />
-                {g.label}
-                {g.count > 1 && <span className="muted"> ×{g.count}</span>}
+                {g.name}
+                <SlotBadge group={g} />
                 <span className="muted hm-kind">{g.count > 0 ? "healer" : "raid CD"}</span>
               </div>
               <div />
             </div>
             {g.rows.map((row) => {
-              const key = String(row.spellId);
+              const key = row.key;
               const h = hovered(key);
               return (
-                <div key={row.spellId} className="hm-row">
+                <div key={row.key} className="hm-row">
                   <div className="hm-label">
                     <SpellLink id={row.spellId} name={row.spellName} />
                   </div>
@@ -341,7 +355,7 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
                         row={row}
                         phase={phases[h.pi]}
                         slice={row.phases[h.pi][h.si]}
-                        killCount={timeline.killCount}
+                        killCount={row.killCount}
                         single={single}
                         damage={timeline.damage?.[h.pi][h.si]}
                         style={tipStyle(h.pi, row.phases[h.pi][h.si])}
@@ -449,8 +463,8 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
   const views = phoneViews(phases);
   const [vi, setVi] = useState(0);
   const [spec, setSpec] = useState<string | null>(null);
-  // spellId null is the raid damage row.
-  const [picked, setPicked] = useState<{ spellId: number | null; si: number } | null>(null);
+  // rowKey null is the raid damage row.
+  const [picked, setPicked] = useState<{ rowKey: string | null; si: number } | null>(null);
   const view = views[vi];
   const phase = phases[view.pi];
   const single = phases.length === 1;
@@ -458,8 +472,8 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
   const maxAll = Math.max(...timeline.all.flat().map((s) => s.perKill), 0.0001);
   const healerGroups = timeline.groups.filter((g) => g.count > 0);
   const shown = timeline.groups.filter((g) => g.count === 0 || spec === null || g.label === spec);
-  const pickedRow = picked && picked.spellId !== null && timeline.groups.flatMap((g) => g.rows).find((r) => r.spellId === picked.spellId);
-  const pickedDamage = picked && picked.spellId === null ? timeline.damage?.[view.pi][picked.si] : undefined;
+  const pickedRow = picked && picked.rowKey !== null && timeline.groups.flatMap((g) => g.rows).find((r) => r.key === picked.rowKey);
+  const pickedDamage = picked && picked.rowKey === null ? timeline.damage?.[view.pi][picked.si] : undefined;
   const pickedGroup = pickedRow && timeline.groups.find((g) => g.rows.includes(pickedRow));
 
   return (
@@ -556,10 +570,10 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
                     <button
                       key={si}
                       type="button"
-                      className={picked?.spellId === null && picked.si === si ? "hm-bar-on" : ""}
+                      className={picked?.rowKey === null && picked.si === si ? "hm-bar-on" : ""}
                       style={{ flexGrow: d.endMs - d.startMs }}
                       aria-label={`Raid damage, ${formatTime(d.startMs)} into ${single ? "the fight" : `phase ${phase.id}`}${d.ratio === null ? "" : `, ${ratioText(d.ratio)} average`}`}
-                      onClick={() => setPicked({ spellId: null, si })}
+                      onClick={() => setPicked({ rowKey: null, si })}
                     >
                       <span style={{ height: `${Math.max(h > 0 ? 4 : 0, h * 100)}%`, opacity: 0.35 + 0.65 * h }} />
                     </button>
@@ -575,14 +589,14 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
           >
             <div className="hm-group">
               <span className="hm-dot" aria-hidden="true" />
-              {g.label}
-              {g.count > 1 && <span className="muted"> ×{g.count}</span>}
+              {g.name}
+              <SlotBadge group={g} />
               <span className="muted hm-kind">{g.count > 0 ? "healer" : "raid CD"}</span>
             </div>
             {g.rows.map((row) => {
               const slices = row.phases[view.pi].map((s, si) => ({ ...s, si })).filter(inView);
               return (
-                <div key={row.spellId} className="hm-phone-row">
+                <div key={row.key} className="hm-phone-row">
                   <div className="hm-phone-name">
                     <span>
                       <SpellLink id={row.spellId} name={row.spellName} />
@@ -596,10 +610,10 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
                       <button
                         key={s.si}
                         type="button"
-                        className={`hm-l${rowShade(row)(s.share)}${picked?.spellId === row.spellId && picked.si === s.si ? " hm-on" : ""}`}
+                        className={`hm-l${rowShade(row)(s.share)}${picked?.rowKey === row.key && picked.si === s.si ? " hm-on" : ""}`}
                         style={{ flexGrow: s.endMs - s.startMs }}
                         aria-label={`${row.spellName}, ${formatTime(s.startMs)} into ${single ? "the fight" : `phase ${phase.id}`}, ${Math.round(s.share * 100)}% of kills`}
-                        onClick={() => setPicked({ spellId: row.spellId, si: s.si })}
+                        onClick={() => setPicked({ rowKey: row.key, si: s.si })}
                       />
                     ))}
                   </div>
@@ -617,7 +631,7 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
           group={pickedGroup.label}
           phase={phase}
           slice={pickedRow.phases[view.pi][picked.si]}
-          killCount={timeline.killCount}
+          killCount={pickedRow.killCount}
           single={single}
           damage={timeline.damage?.[view.pi][picked.si]}
           onClose={() => setPicked(null)}

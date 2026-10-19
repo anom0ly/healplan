@@ -1,6 +1,6 @@
 import { listBosses, loadKills, type BossOption } from "@/lib/db";
 import { buildPlan, type Plan } from "@/lib/engine/plan";
-import { formatTime, toNote } from "@/lib/engine/note";
+import { toNote } from "@/lib/engine/note";
 import { buildTimeline } from "@/lib/engine/timeline";
 import { parseComp, parsePlanRequest } from "@/lib/request";
 import { Heatmap } from "./heatmap";
@@ -46,62 +46,32 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       />
 
       {error && <p>Couldn&apos;t load kills: {error}</p>}
-      {plan && <PlanView plan={plan} />}
+      {plan && <PlanView plan={plan} logsHref={`/logs?${queryString(params)}`} />}
     </main>
   );
 }
 
-function PlanView({ plan }: { plan: Plan }) {
+/** The page's own query, for links to pages about the same boss and comp. */
+function queryString(params: Record<string, string | string[] | undefined>) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (typeof v === "string") q.set(k, v);
+  return q.toString();
+}
+
+function PlanView({ plan, logsHref }: { plan: Plan; logsHref: string }) {
   if (plan.killsUsed.length === 0) return <p>No matching kills yet. Try a looser comp or turn off first kills only.</p>;
   return (
     <section>
       <p className="muted">
         Based on {plan.killsUsed.length} kills, {plan.killsUsed.filter((k) => k.kill.killIndex === 1).length} of them
-        first kills.
+        first kills.{" "}
+        <a className="see-logs" href={logsHref}>
+          See the logs →
+        </a>
       </p>
       <Heatmap desktop={buildTimeline(plan, 4_000)} phone={buildTimeline(plan, 8_000)} />
-      <h2>Timings</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Phase</th>
-            <th>Time</th>
-            <th>Cooldown</th>
-            <th>Agreement</th>
-          </tr>
-        </thead>
-        <tbody>
-          {plan.timings.map((t) => (
-            <tr key={`${t.spellId}-${t.phaseId}-${t.tPhaseMs}`}>
-              <td>P{t.phaseId}</td>
-              <td>
-                {formatTime(t.tPhaseMs)} <span className="muted">({formatTime(t.earliestMs)} to {formatTime(t.latestMs)})</span>
-              </td>
-              <td>{t.spellName}</td>
-              <td>
-                {Math.round(t.support * 100)}% <span className="muted">({t.killCount} kills)</span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
       <h2>Note</h2>
       <pre>{toNote(plan.timings)}</pre>
-      <h2>Logs used</h2>
-      <ul>
-        {[...plan.killsUsed]
-          .sort((a, b) => b.weight - a.weight)
-          .slice(0, 15)
-          .map(({ kill }) => (
-            <li key={`${kill.reportCode}-${kill.fightId}`}>
-              <a href={`https://www.warcraftlogs.com/reports/${kill.reportCode}#fight=${kill.fightId}`}>{kill.guildName}</a>{" "}
-              <span className="muted">
-                {kill.killIndex === 1 ? "first kill" : kill.killIndex ? `kill ${kill.killIndex}` : "kill"},{" "}
-                {new Date(kill.killDate).toISOString().slice(0, 10)}
-              </span>
-            </li>
-          ))}
-      </ul>
     </section>
   );
 }

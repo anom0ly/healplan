@@ -125,7 +125,7 @@ describe("damage on the timeline", () => {
     expect(slices[0].ratio).toBeLessThan(1);
     expect(spike.top?.name).toBe("Big Slam");
     expect(spike.top!.share).toBeGreaterThan(0.8);
-    expect(slices[0].top).toEqual({ name: "Melee", share: 1 });
+    expect(slices[0].top).toEqual({ id: 1, name: "Melee", share: 1 });
   });
 
   it("is null when no kill has damage stored", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatTime } from "@/lib/engine/note";
 import type { DamageSlice, HeatSlice, Timeline, TimelinePhase, TimelineRow } from "@/lib/engine/timeline";
 
@@ -23,6 +23,19 @@ function mostCommon(row: TimelineRow, p: TimelinePhase, s: HeatSlice, single: bo
   return single ? formatTime(near.tPhaseMs) : `${formatTime(p.startMs + near.tPhaseMs)} · P${p.id} +${formatTime(near.tPhaseMs)}`;
 }
 
+/** A spell name that opens on Wowhead, which also shows its tooltip on hover. Melee (id 1) has no page. */
+function SpellLink({ id, name }: { id: number; name: string }) {
+  if (id <= 1) return <>{name}</>;
+  return (
+    <a className="wh" href={`https://www.wowhead.com/spell=${id}`} target="_blank" rel="noopener noreferrer">
+      {name}
+    </a>
+  );
+}
+
+/** CSS class that sets a group's heat color to its WoW class color. */
+const classTone = (wowClass: string) => `hm-c-${wowClass.toLowerCase().replace(/\s+/g, "-")}`;
+
 /** Height of a damage bar, 0 to 1, against the slice that hurts most. */
 const maxRatio = (damage: DamageSlice[][]) => Math.max(...damage.flat().map((d) => d.ratio ?? 0), 0.0001);
 const ratioText = (r: number) => `${r < 10 ? r.toFixed(1) : Math.round(r)}×`;
@@ -31,7 +44,7 @@ const ratioText = (r: number) => `${r < 10 ? r.toFixed(1) : Math.round(r)}×`;
 function pressedHere(timeline: Timeline, pi: number, si: number, limit = 3) {
   return timeline.groups
     .flatMap((g) => g.rows)
-    .map((r) => ({ name: r.spellName, share: r.phases[pi][si].share }))
+    .map((r) => ({ id: r.spellId, name: r.spellName, share: r.phases[pi][si].share }))
     .filter((r) => r.share > 0)
     .sort((a, b) => b.share - a.share)
     .slice(0, limit);
@@ -49,7 +62,10 @@ function DamageLines({ d }: { d: DamageSlice }) {
         <div className="hm-dmg-top">
           <span className="hm-dmg-dot" aria-hidden="true" />
           <span>
-            Mostly <strong>{d.top.name}</strong>
+            Mostly{" "}
+            <strong>
+              <SpellLink id={d.top.id} name={d.top.name} />
+            </strong>
           </span>
           <span className="hm-mono">{Math.round(d.top.share * 100)}%</span>
         </div>
@@ -66,7 +82,10 @@ function DamageNote({ d }: { d: DamageSlice | undefined }) {
       Raid damage <span className="hm-tip-strong">{ratioText(d.ratio)}</span> average
       {d.top && (
         <>
-          , mostly <span className="hm-tip-strong">{d.top.name}</span>
+          , mostly{" "}
+          <span className="hm-tip-strong">
+            <SpellLink id={d.top.id} name={d.top.name} />
+          </span>
         </>
       )}
     </div>
@@ -80,8 +99,10 @@ function PressedList({ timeline, pi, si }: { timeline: Timeline; pi: number; si:
     <div>
       <div className="hm-tip-muted">Pressed here in</div>
       {list.map((r) => (
-        <div key={r.name} className="hm-pressed">
-          <span>{r.name}</span>
+        <div key={r.id} className="hm-pressed">
+          <span>
+            <SpellLink id={r.id} name={r.name} />
+          </span>
           <span className="hm-mono">{Math.round(r.share * 100)}%</span>
         </div>
       ))}
@@ -140,7 +161,29 @@ type Hover = { key: string; pi: number; si: number } | null;
 
 function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
   const [hover, setHover] = useState<Hover>(null);
+  // A clicked slice keeps its card open so the links in it can be clicked.
+  const [pinned, setPinned] = useState<Hover>(null);
+  const shown = pinned ?? hover;
   const { phases, totalMs } = timeline;
+
+  useEffect(() => {
+    if (!pinned) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Element;
+      if (!t.closest(".hm-tip, .hm-cell, .hm-bar")) setPinned(null);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPinned(null);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [pinned]);
+
+  const pin = (h: NonNullable<Hover>) =>
+    setPinned((p) => (p && p.key === h.key && p.pi === h.pi && p.si === h.si ? null : h));
+  const tipClass = (extra = "") => `hm-tip${extra}${pinned ? " hm-tip-pinned" : ""}`;
   // A boss with no phase changes reads as one fight, with no phase labels.
   const single = phases.length === 1;
   const maxAll = Math.max(...timeline.all.flat().map((s) => s.perKill), 0.0001);
@@ -156,13 +199,14 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
         <div key={p.id} className={`hm-phase${pi > 0 ? " hm-phase-break" : ""}`} style={{ width: `${p.widthPct}%` }}>
           {cells[pi].map((c, si) => {
             const s = timeline.all[pi][si];
-            const on = hover?.key === key && hover.pi === pi && hover.si === si;
+            const on = shown?.key === key && shown.pi === pi && shown.si === si;
             return (
               <div
                 key={si}
                 className={`hm-cell hm-l${c.level}${on ? " hm-on" : ""}`}
                 style={{ flexGrow: s.endMs - s.startMs }}
                 onMouseEnter={() => setHover({ key, pi, si })}
+                onClick={() => pin({ key, pi, si })}
               />
             );
           })}
@@ -171,11 +215,11 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
     </div>
   );
 
-  const hovered = (key: string) => (hover?.key === key ? hover : null);
+  const hovered = (key: string) => (shown?.key === key ? shown : null);
 
   return (
     <div className="hm-desktop">
-      <Legend hint="Hover a slice for times and how often it's pressed" phased={!single} damage={!!timeline.damage} />
+      <Legend hint="Hover a slice for details, click to keep it open" phased={!single} damage={!!timeline.damage} />
       <div className="hm-card">
         <div className="hm-row hm-head">
           <div />
@@ -205,8 +249,9 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
                         key={si}
                         d={d}
                         max={maxRatio(timeline.damage!)}
-                        on={hover?.key === "dmg" && hover.pi === pi && hover.si === si}
+                        on={shown?.key === "dmg" && shown.pi === pi && shown.si === si}
                         onEnter={() => setHover({ key: "dmg", pi, si })}
+                        onClick={() => pin({ key: "dmg", pi, si })}
                       />
                     ))}
                   </div>
@@ -217,7 +262,7 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
                 if (!h) return null;
                 const d = timeline.damage![h.pi][h.si];
                 return (
-                  <div className="hm-tip hm-tip-below" style={tipStyle(h.pi, d)}>
+                  <div className={tipClass(" hm-tip-below")} style={tipStyle(h.pi, d)}>
                     <div className="hm-tip-title">Raid damage</div>
                     <div>
                       <span className="hm-mono">{fightRange(phases[h.pi], d)}</span> into the fight
@@ -251,7 +296,7 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
               if (!h) return null;
               const s = timeline.all[h.pi][h.si];
               return (
-                <div className="hm-tip hm-tip-below" style={tipStyle(h.pi, s)}>
+                <div className={tipClass(" hm-tip-below")} style={tipStyle(h.pi, s)}>
                   <div className="hm-tip-title">All healing CDs</div>
                   <div>
                     <span className="hm-mono">{fightRange(phases[h.pi], s)}</span> into the fight
@@ -271,9 +316,10 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
         </div>
 
         {timeline.groups.map((g) => (
-          <div key={g.label}>
+          <div key={g.label} className={classTone(g.wowClass)}>
             <div className="hm-row">
               <div className="hm-group">
+                <span className="hm-dot" aria-hidden="true" />
                 {g.label}
                 {g.count > 1 && <span className="muted"> ×{g.count}</span>}
                 <span className="muted hm-kind">{g.count > 0 ? "healer" : "raid CD"}</span>
@@ -285,7 +331,9 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
               const h = hovered(key);
               return (
                 <div key={row.spellId} className="hm-row">
-                  <div className="hm-label">{row.spellName}</div>
+                  <div className="hm-label">
+                    <SpellLink id={row.spellId} name={row.spellName} />
+                  </div>
                   <div className="hm-track" onMouseLeave={() => setHover(null)}>
                     {strip(key, row.phases.map((slices) => slices.map((s) => ({ level: rowShade(row)(s.share) }))))}
                     {h && (
@@ -297,6 +345,7 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
                         single={single}
                         damage={timeline.damage?.[h.pi][h.si]}
                         style={tipStyle(h.pi, row.phases[h.pi][h.si])}
+                        className={tipClass()}
                       />
                     )}
                   </div>
@@ -321,10 +370,11 @@ function DesktopHeatmap({ timeline }: { timeline: Timeline }) {
   );
 }
 
-function DamageBar({ d, max, on, onEnter }: { d: DamageSlice; max: number; on: boolean; onEnter: () => void }) {
+function DamageBar(props: { d: DamageSlice; max: number; on: boolean; onEnter: () => void; onClick: () => void }) {
+  const { d, max, on } = props;
   const h = d.ratio === null ? 0 : d.ratio / max;
   return (
-    <div className={`hm-bar${on ? " hm-bar-on" : ""}`} style={{ flexGrow: d.endMs - d.startMs }} onMouseEnter={onEnter}>
+    <div className={`hm-bar${on ? " hm-bar-on" : ""}`} style={{ flexGrow: d.endMs - d.startMs }} onMouseEnter={props.onEnter} onClick={props.onClick}>
       <span style={{ height: `${Math.max(h > 0 ? 4 : 0, h * 100)}%`, opacity: 0.35 + 0.65 * h }} />
     </div>
   );
@@ -338,12 +388,15 @@ function SliceTip(props: {
   single: boolean;
   damage: DamageSlice | undefined;
   style: React.CSSProperties;
+  className: string;
 }) {
   const { row, phase, slice } = props;
   const common = mostCommon(row, phase, slice, props.single);
   return (
-    <div className="hm-tip" style={props.style}>
-      <div className="hm-tip-title">{row.spellName}</div>
+    <div className={props.className} style={props.style}>
+      <div className="hm-tip-title">
+        <SpellLink id={row.spellId} name={row.spellName} />
+      </div>
       <div>
         <span className="hm-mono">{fightRange(phase, slice)}</span> into the fight
       </div>
@@ -516,8 +569,12 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
           </div>
         )}
         {shown.map((g, gi) => (
-          <div key={g.label} className={gi > 0 && g.count === 0 && shown[gi - 1].count > 0 ? "hm-raid-start" : ""}>
+          <div
+            key={g.label}
+            className={`${classTone(g.wowClass)}${gi > 0 && g.count === 0 && shown[gi - 1].count > 0 ? " hm-raid-start" : ""}`}
+          >
             <div className="hm-group">
+              <span className="hm-dot" aria-hidden="true" />
               {g.label}
               {g.count > 1 && <span className="muted"> ×{g.count}</span>}
               <span className="muted hm-kind">{g.count > 0 ? "healer" : "raid CD"}</span>
@@ -527,7 +584,9 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
               return (
                 <div key={row.spellId} className="hm-phone-row">
                   <div className="hm-phone-name">
-                    <span>{row.spellName}</span>
+                    <span>
+                      <SpellLink id={row.spellId} name={row.spellName} />
+                    </span>
                     {Math.max(...slices.map((s) => s.share)) < RARE && (
                       <span className="muted hm-small">{single ? "Rarely used here" : "Rarely used this phase"}</span>
                     )}
@@ -571,7 +630,7 @@ function PhoneHeatmap({ timeline }: { timeline: Timeline }) {
   );
 }
 
-function SheetHead({ title, sub, onClose }: { title: string; sub?: string; onClose: () => void }) {
+function SheetHead({ title, sub, onClose }: { title: React.ReactNode; sub?: string; onClose: () => void }) {
   return (
     <div className="hm-sheet-head">
       <div>
@@ -630,7 +689,7 @@ function PhoneSheet(props: {
   const common = mostCommon(row, phase, slice, props.single);
   return (
     <div className="hm-sheet" role="dialog" aria-label={`${row.spellName} details`}>
-      <SheetHead title={row.spellName} sub={props.group} onClose={props.onClose} />
+      <SheetHead title={<SpellLink id={row.spellId} name={row.spellName} />} sub={props.group} onClose={props.onClose} />
       <SheetTimes phase={phase} slice={slice} single={props.single} />
       <div>
         Pressed around here in <strong>{Math.round(slice.share * 100)}%</strong> of kills{" "}

@@ -40,7 +40,8 @@ export interface PickerInitial {
 
 type CompsState = { encounter: string; difficulty: Difficulty; comps: CompSummary[] | null; failed?: boolean };
 
-export function Picker({ bosses, initial }: { bosses: BossOption[]; initial: PickerInitial }) {
+/** `keep` holds query params the form carries along unchanged, such as a pasted log. */
+export function Picker({ bosses, initial, keep = {} }: { bosses: BossOption[]; initial: PickerInitial; keep?: Record<string, string> }) {
   const [encounter, setEncounter] = useState(initial.encounter);
   const [difficulty, setDifficulty] = useState<Difficulty>(initial.difficulty);
   const [comp, setComp] = useState<HealerSpec[]>(sortComp(initial.comp));
@@ -81,6 +82,9 @@ export function Picker({ bosses, initial }: { bosses: BossOption[]; initial: Pic
 
   return (
     <form method="get" className="pk">
+      {Object.entries(keep).map(([k, v]) => (
+        <input key={k} type="hidden" name={k} value={v} />
+      ))}
       <div className="pk-top">
         {bosses.length > 0 ? (
           <label className="pk-field">

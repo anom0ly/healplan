@@ -11,7 +11,8 @@
  */
 import { parseArgs } from "node:util";
 import { backfillDamage, crawlBoss } from "@/lib/crawl";
-import { db, migrate, saveEncounters } from "@/lib/db";
+import { db, deleteOldUserReports, migrate, saveEncounters } from "@/lib/db";
+import { RETENTION_DAYS } from "@/lib/reports";
 import type { Difficulty } from "@/lib/types";
 import type { RankingMetric } from "@/lib/wcl/queries";
 import { WclClient } from "@/lib/wcl/client";
@@ -38,6 +39,8 @@ if (!values.zone) {
 async function main() {
   const wcl = new WclClient();
   await migrate();
+  const expired = await deleteOldUserReports(RETENTION_DAYS);
+  if (expired > 0) console.log(`Deleted ${expired} pasted logs not looked at in ${RETENTION_DAYS} days`);
   const zone = await zoneEncounters(wcl, Number(values.zone));
   console.log(`${zone.name}: ${zone.encounters.map((e) => `${e.name} (${e.id})`).join(", ")}`);
   // Boss names feed the site's boss picker.

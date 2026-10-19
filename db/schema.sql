@@ -61,3 +61,20 @@ CREATE TABLE IF NOT EXISTS encounters (
 
 -- Damage the raid took per slice of the fight (see KillDamage in src/lib/types.ts). NULL = not fetched yet.
 ALTER TABLE kills ADD COLUMN IF NOT EXISTS damage jsonb;
+
+-- Reports people pasted to check their pulls against the plan, with every boss pull in them.
+-- Deleted two weeks after they were last fetched (see deleteOldUserReports).
+CREATE TABLE IF NOT EXISTS user_reports (
+  report_code text        PRIMARY KEY,
+  title       text        NOT NULL,
+  fights      jsonb       NOT NULL, -- [{ id, encounterId, difficulty, kill, durationMs, bossPercent, phases }, ...]
+  fetched_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- Healers, cooldown presses and damage for one pull of a pasted report. Pulls never change once over, so they're fetched once.
+CREATE TABLE IF NOT EXISTS user_pulls (
+  report_code text    NOT NULL REFERENCES user_reports ON DELETE CASCADE,
+  fight_id    integer NOT NULL,
+  data        jsonb   NOT NULL, -- { healers, casts, damage }
+  PRIMARY KEY (report_code, fight_id)
+);

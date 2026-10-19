@@ -74,3 +74,16 @@ describe("a comp with one of a spec", () => {
     expect(t.groups[0].rows.map((r) => r.key)).toEqual(["740"]);
   });
 });
+
+describe("cooldowns other specs share", () => {
+  it("leaves out Avenging Wrath pressed by a Retribution Paladin", () => {
+    const WINGS = 31884;
+    const ret = [1, 2, 3].map(() =>
+      kill({ healers: ["HolyPaladin"], casts: [cast(WINGS, 30_000, "Holy"), cast(WINGS, 90_000, "Ret", null)] }),
+    );
+    const plan = buildPlan(ret, ["HolyPaladin"], { weight: { now: NOW } });
+    expect(plan.timings.filter((t) => t.spellId === WINGS).map((t) => t.tPhaseMs)).toEqual([30_000]);
+    expect(assignSlots(plan.killsUsed).players(ret[0], "HolyPaladin")).toBe(1);
+  });
+});
+

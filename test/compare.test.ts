@@ -93,4 +93,28 @@ describe("comparePulls", () => {
     const r = comparePulls([timing(RALLY, null, 1, 30_000)], comp, [pull()]);
     expect(r.lines).toEqual([]);
   });
+
+  it("ignores a Retribution Paladin's Avenging Wrath and a Devastation Evoker's Zephyr", () => {
+    const WINGS = 31884;
+    const ZEPHYR = 374227;
+    const comp2: HealerSpec[] = ["HolyPaladin", "PreservationEvoker"];
+    const plan = [timing(WINGS, "HolyPaladin", 1, 60_000), timing(ZEPHYR, "PreservationEvoker", 1, 90_000)];
+    const p = pull({
+      healers: [
+        { name: "Holy", spec: "HolyPaladin" },
+        { name: "Pres", spec: "PreservationEvoker" },
+      ],
+      // The damage dealers press more often, which used to win them the healer's slot.
+      casts: [
+        cast(WINGS, 30_000, "Ret", null),
+        cast(WINGS, 60_000, "Ret", null),
+        cast(WINGS, 61_000, "Holy"),
+        cast(ZEPHYR, 90_000, "Dev", null),
+        cast(ZEPHYR, 150_000, "Dev", null),
+      ],
+    });
+    const { lines, pulls } = comparePulls(plan, comp2, [p]);
+    expect(lines.map((l) => l.player)).toEqual(["Holy", "Pres"]);
+    expect(pulls[0].marks.map((m) => m.verdict)).toEqual(["on", "missed"]);
+  });
 });

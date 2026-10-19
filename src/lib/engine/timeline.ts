@@ -1,4 +1,4 @@
-import { COOLDOWN_BY_ID, cooldownsForComp } from "@/data/cooldowns";
+import { COOLDOWN_BY_ID, cooldownsForComp, pressedByItsSpec } from "@/data/cooldowns";
 import { HEALER_SPECS, SPEC_CLASS, SPEC_LABEL, killKey, type HealerSpec, type KillRecord } from "@/lib/types";
 import { toPhaseTime } from "./cluster";
 import type { Plan } from "./plan";
@@ -249,7 +249,7 @@ export function buildTimeline(plan: Plan, bucketMs = 4_000, opts: Partial<HeatOp
   for (const { kill, weight } of kills) {
     const key = killKey(kill);
     for (const c of kill.casts) {
-      if (!spells.has(c.spellId)) continue;
+      if (!spells.has(c.spellId) || !pressedByItsSpec(c)) continue;
       const spec = COOLDOWN_BY_ID.get(c.spellId)?.spec ?? null;
       const slot = slots.of(kill, c);
       if (spec !== null && slot > compCount(spec)) continue;

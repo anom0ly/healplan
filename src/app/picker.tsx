@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BossOption } from "@/lib/db";
 import { matchCounts, sortComp, type CompSummary } from "@/lib/engine/comp";
 import { DEFAULT_WEIGHT_OPTIONS } from "@/lib/engine/weighting";
 import { HEALER_SPECS, SPEC_LABEL, type Difficulty, type HealerSpec } from "@/lib/types";
+import { announceShownSpecs } from "./shown-specs";
 
 const MAX_HEALERS = 6;
 const POPULAR = 5;
@@ -36,20 +37,49 @@ export interface PickerInitial {
   difficulty: Difficulty;
   comp: HealerSpec[];
   firstKillsOnly: boolean;
+  /** Any comp: `comp` holds the specs to show. */
+  anyComp: boolean;
 }
 
 type CompsState = { encounter: string; difficulty: Difficulty; comps: CompSummary[] | null; failed?: boolean };
 
-/** `keep` holds query params the form carries along unchanged, such as a pasted log. */
-export function Picker({ bosses, initial, keep = {} }: { bosses: BossOption[]; initial: PickerInitial; keep?: Record<string, string> }) {
+/**
+ * `keep` holds query params the form carries along unchanged, such as a pasted log.
+ * `live` is true while the page shows the any-comp heat map for `initial`, so turning specs on or off updates it in place.
+ */
+export function Picker({
+  bosses,
+  initial,
+  keep = {},
+  live = false,
+}: {
+  bosses: BossOption[];
+  initial: PickerInitial;
+  keep?: Record<string, string>;
+  live?: boolean;
+}) {
+  const form = useRef<HTMLFormElement>(null);
   const [encounter, setEncounter] = useState(initial.encounter);
   const [difficulty, setDifficulty] = useState<Difficulty>(initial.difficulty);
-  const [comp, setComp] = useState<HealerSpec[]>(sortComp(initial.comp));
+  const [anyComp, setAnyComp] = useState(initial.anyComp);
+  const [comp, setComp] = useState<HealerSpec[]>(initial.anyComp ? [] : sortComp(initial.comp));
+  // Any comp starts with every spec on.
+  const [shownSpecs, setShownSpecs] = useState<HealerSpec[]>(
+    initial.anyComp && initial.comp.length > 0 ? HEALER_SPECS.filter((s) => initial.comp.includes(s)) : [...HEALER_SPECS],
+  );
+  // Switching between your comp and any comp shows the new heat map straight away.
+  const [submitSoon, setSubmitSoon] = useState(false);
   const [firstKillsOnly, setFirstKillsOnly] = useState(initial.firstKillsOnly);
   // null until the person chooses, so the picker can open build-your-own on its own.
   const [buildOwn, setBuildOwn] = useState<boolean | null>(null);
   const [info, setInfo] = useState(false);
   const [loaded, setLoaded] = useState<CompsState>({ encounter: "", difficulty: "mythic", comps: null });
+
+  useEffect(() => {
+    if (!submitSoon) return;
+    setSubmitSoon(false);
+    form.current?.requestSubmit();
+  }, [submitSoon]);
 
   useEffect(() => {
     if (!encounter) return;
@@ -69,19 +99,45 @@ export function Picker({ bosses, initial, keep = {} }: { bosses: BossOption[]; i
   const pickedPopular = popular.some((p) => sameComp(p.healers, comp));
   // A comp from a link that isn't one of the popular ones opens straight into build-your-own.
   const showBuild = buildOwn ?? (comps !== null && (popular.length === 0 || (comp.length > 0 && !pickedPopular)));
-  const counts = HEALER_SPECS.map((s) => [s, comp.filter((x) => x === s).length] as const).filter(([, n]) => n > 0);
+  const picked = anyComp ? shownSpecs : comp;
+  const counts = HEALER_SPECS.map((s) => [s, picked.filter((x) => x === s).length] as const).filter(([, n]) => n > 0);
   const m = matchCounts(comp, comps ?? [], DEFAULT_WEIGHT_OPTIONS.minCompSimilarity);
   const matching = firstKillsOnly ? m.firstKills : m.exact + m.close;
+
+  const anyKills = (comps ?? []).filter((c) => c.healers.some((h) => shownSpecs.includes(h)));
+  const sameView = live && encounter === initial.encounter && difficulty === initial.difficulty && firstKillsOnly === initial.firstKillsOnly;
+
+  const switchMode = (any: boolean) => {
+    if (any === anyComp) return;
+    setAnyComp(any);
+    setInfo(false);
+    if (encounter && (any || comp.length > 0)) setSubmitSoon(true);
+  };
+
+  const toggleShown = (spec: HealerSpec) => {
+    const next = shownSpecs.includes(spec) ? shownSpecs.filter((s) => s !== spec) : HEALER_SPECS.filter((s) => s === spec || shownSpecs.includes(s));
+    setShownSpecs(next);
+    if (!sameView) return;
+    // The heat map already has every spec, so it just hides or shows rows, and the link keeps the choice.
+    const url = new URL(window.location.href);
+    for (const s of HEALER_SPECS) url.searchParams.delete(s);
+    for (const s of next) url.searchParams.set(s, "1");
+    window.history.replaceState(null, "", url);
+    announceShownSpecs(next);
+  };
 
   const add = (spec: HealerSpec) => setComp((c) => (c.length < MAX_HEALERS ? sortComp([...c, spec]) : c));
   const removeAt = (i: number) => setComp((c) => c.filter((_, j) => j !== i));
 
   let pill = "Pick your healers";
-  if (comps === null && comp.length > 0) pill = "Counting kills…";
+  if (anyComp) {
+    const n = (firstKillsOnly ? anyKills.map((c) => c.firstKills) : anyKills.map((c) => c.kills)).reduce((a, b) => a + b, 0);
+    pill = shownSpecs.length === 0 ? "Pick a healer spec" : comps === null ? "Counting kills…" : `${n.toLocaleString("en-US")} kills`;
+  } else if (comps === null && comp.length > 0) pill = "Counting kills…";
   else if (comp.length > 0) pill = matching ? `${matching.toLocaleString("en-US")} matching kills` : "No matching kills yet";
 
   return (
-    <form method="get" className="pk">
+    <form method="get" className="pk" ref={form}>
       {Object.entries(keep).map(([k, v]) => (
         <input key={k} type="hidden" name={k} value={v} />
       ))}
@@ -126,17 +182,40 @@ export function Picker({ bosses, initial, keep = {} }: { bosses: BossOption[]; i
           {counts.map(([s, n]) => (
             <input key={s} type="hidden" name={s} value={n} />
           ))}
+          {anyComp && <input type="hidden" name="any" value="1" />}
 
           <div className="pk-section">
-            <span className="pk-title">Pick your healing comp</span>
-            {comps === null ? (
+            <div className="pk-mode">
+              <span className="pk-title">{anyComp ? "Healer specs to show" : "Pick your healing comp"}</span>
+              <div className="pk-seg pk-seg-sm" role="group" aria-label="Kills to use">
+                <button type="button" className={anyComp ? undefined : "pk-on"} aria-pressed={!anyComp} title="Kills with your healing comp or a close one" onClick={() => switchMode(false)}>
+                  Your comp
+                </button>
+                <button type="button" className={anyComp ? "pk-on" : undefined} aria-pressed={anyComp} title="Every kill with the spec, whoever else healed" onClick={() => switchMode(true)}>
+                  Any comp
+                </button>
+              </div>
+            </div>
+            {anyComp ? (
+              <div className="pk-tray pk-shown">
+                {HEALER_SPECS.map((s) => {
+                  const on = shownSpecs.includes(s);
+                  return (
+                    <button key={s} type="button" className={on ? "pk-on" : undefined} aria-pressed={on} title={`${on ? "Hide" : "Show"} ${SPEC_LABEL[s]}`} onClick={() => toggleShown(s)}>
+                      <Badge spec={s} className="pk-badge pk-badge-lg" />
+                      <span className="pk-tray-name">{SPEC_LABEL[s]}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : comps === null ? (
               <p className="muted">Loading comps…</p>
             ) : current?.failed ? (
               <p className="muted">Couldn&apos;t load comps for this boss. Build yours below.</p>
             ) : popular.length === 0 ? (
               <p className="muted">No kills stored for this boss yet.</p>
             ) : null}
-            {(popular.length > 0 || comps === null) && (
+            {!anyComp && (popular.length > 0 || comps === null) && (
               <div className="pk-popular">
                 {popular.map((p) => {
                   const on = !showBuild && sameComp(p.healers, comp);
@@ -175,7 +254,7 @@ export function Picker({ bosses, initial, keep = {} }: { bosses: BossOption[]; i
             )}
           </div>
 
-          {showBuild && (
+          {!anyComp && showBuild && (
             <div className="pk-build">
               <div className="pk-slots">
                 {Array.from({ length: MAX_HEALERS }, (_, i) =>
@@ -216,10 +295,18 @@ export function Picker({ bosses, initial, keep = {} }: { bosses: BossOption[]; i
 
           <div className="pk-bar">
             <div className="pk-match">
-              <button type="button" className="pk-pill" aria-expanded={info} disabled={comp.length === 0} onClick={() => setInfo((v) => !v)}>
+              <button type="button" className="pk-pill" aria-expanded={info} disabled={picked.length === 0} onClick={() => setInfo((v) => !v)}>
                 {pill} <span className="muted" aria-hidden="true">ⓘ</span>
               </button>
-              {info && comp.length > 0 && comps !== null && (
+              {info && anyComp && shownSpecs.length > 0 && comps !== null && (
+                <div className="pk-info">
+                  <span>Every kill with {shownSpecs.length === HEALER_SPECS.length ? "any of these specs" : shownSpecs.map((s) => SPEC_LABEL[s]).join(", ")}</span>
+                  <span className="pk-info-muted">
+                    {anyKills.reduce((a, c) => a + c.firstKills, 0).toLocaleString("en-US")} are guild first kills
+                  </span>
+                </div>
+              )}
+              {info && !anyComp && comp.length > 0 && comps !== null && (
                 <div className="pk-info">
                   <span>{m.exact.toLocaleString("en-US")} exact comp</span>
                   <span>{m.close.toLocaleString("en-US")} close comp</span>
@@ -231,7 +318,7 @@ export function Picker({ bosses, initial, keep = {} }: { bosses: BossOption[]; i
               <input name="firstKillsOnly" type="checkbox" value="1" checked={firstKillsOnly} onChange={(e) => setFirstKillsOnly(e.target.checked)} />
               First kills only
             </label>
-            <button type="submit" className="pk-go" disabled={comp.length === 0}>
+            <button type="submit" className="pk-go" disabled={picked.length === 0}>
               Show cooldowns
             </button>
           </div>

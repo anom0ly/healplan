@@ -21,6 +21,8 @@ export interface PlannedTiming {
 
 export interface Plan {
   comp: HealerSpec[];
+  /** Built for any comp: each spec's cooldowns judged against every kill with that spec. */
+  anyComp: boolean;
   timings: PlannedTiming[];
   killsUsed: WeightedKill[];
   /** Observed median recast time per spell, in seconds, when kills recast sooner than the base cooldown. */
@@ -31,17 +33,20 @@ export interface PlanOptions {
   weight?: Partial<WeightOptions> & { now: number };
   cluster?: Partial<ClusterOptions>;
   includeRaidWide?: boolean;
+  /** Any comp: pass each spec once and every kill with that spec counts, whoever else healed. */
+  anyComp?: boolean;
 }
 
 /** Builds the consensus cooldown timeline for one boss and difficulty from pre-filtered kills. */
 export function buildPlan(kills: KillRecord[], comp: HealerSpec[], opts: PlanOptions): Plan {
-  const weightOpts: WeightOptions = { ...DEFAULT_WEIGHT_OPTIONS, now: Date.now(), ...opts.weight };
+  const anyComp = opts.anyComp ?? false;
+  const weightOpts: WeightOptions = { ...DEFAULT_WEIGHT_OPTIONS, now: Date.now(), ...opts.weight, anyComp };
   const clusterOpts: ClusterOptions = { ...DEFAULT_CLUSTER_OPTIONS, ...opts.cluster };
   const spells = new Set(cooldownsForComp(comp, opts.includeRaidWide ?? true).map((c) => c.spellId));
 
   const weighted = weighKills(kills, comp, weightOpts);
   const slots = assignSlots(weighted);
-  const pools = compPools(comp, slots);
+  const pools = compPools(comp, slots, anyComp);
 
   const phaseWeight = new Map<string, number>();
   const casts: WeightedCast[] = [];
@@ -63,7 +68,7 @@ export function buildPlan(kills: KillRecord[], comp: HealerSpec[], opts: PlanOpt
       // A comp with one Resto Druid follows Druid #1 only; Druid #2's presses belong to comps with two.
       const inComp = spec === null || slot <= comp.filter((s) => s === spec).length;
       if (inComp) {
-        casts.push({ spellId: c.spellId, ...toPhaseTime(c.timestampMs, kill.phases), killKey: key, weight, slot, pool: poolOf(spec, slot) });
+        casts.push({ spellId: c.spellId, ...toPhaseTime(c.timestampMs, kill.phases), killKey: key, weight, slot, pool: poolOf(spec, slot, anyComp) });
       }
       const srcKey = `${c.source}:${c.spellId}`;
       const prev = lastBySource.get(srcKey);
@@ -93,5 +98,5 @@ export function buildPlan(kills: KillRecord[], comp: HealerSpec[], opts: PlanOpt
     };
   });
 
-  return { comp, timings, killsUsed: weighted, observedCooldownSec };
+  return { comp, anyComp, timings, killsUsed: weighted, observedCooldownSec };
 }

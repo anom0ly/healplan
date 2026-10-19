@@ -13,6 +13,8 @@ export interface WeightOptions {
   durationTolerance: number;
   /** Only use guild first kills. */
   firstKillsOnly: boolean;
+  /** Any comp: every kill with at least one of the comp's specs counts in full, whoever else healed. */
+  anyComp: boolean;
 }
 
 export const DEFAULT_WEIGHT_OPTIONS: Omit<WeightOptions, "now"> = {
@@ -20,6 +22,7 @@ export const DEFAULT_WEIGHT_OPTIONS: Omit<WeightOptions, "now"> = {
   minCompSimilarity: 0.6,
   durationTolerance: 0.2,
   firstKillsOnly: false,
+  anyComp: false,
 };
 
 const DAY_MS = 86_400_000;
@@ -63,7 +66,7 @@ export function weighKills(kills: KillRecord[], comp: HealerSpec[], opts: Weight
   const med = median(eligible.map((k) => k.durationMs));
   const out: WeightedKill[] = [];
   for (const kill of eligible) {
-    const sim = compSimilarity(comp, kill.healers);
+    const sim = opts.anyComp ? (comp.some((s) => kill.healers.includes(s)) ? 1 : 0) : compSimilarity(comp, kill.healers);
     if (sim < opts.minCompSimilarity) continue;
     const weight =
       sim *

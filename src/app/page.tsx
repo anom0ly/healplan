@@ -2,10 +2,11 @@ import { redirect } from "next/navigation";
 import { listBosses, loadKills, type BossOption } from "@/lib/db";
 import { comparePulls } from "@/lib/engine/compare";
 import { buildPlan, type Plan } from "@/lib/engine/plan";
+import { compShifts, type CompShift } from "@/lib/engine/shift";
 import { buildTimeline } from "@/lib/engine/timeline";
 import { compOf, loadReport, parseReportLink, ReportError, type LoadedReport } from "@/lib/reports";
 import { parseComp, parsePlanRequest } from "@/lib/request";
-import { HEALER_SPECS } from "@/lib/types";
+import { HEALER_SPECS, type HealerSpec } from "@/lib/types";
 import { Heatmap } from "./heatmap";
 import { Picker } from "./picker";
 import { PullDetail, PullsOverview } from "./pulls";
@@ -43,13 +44,22 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
   }
 
   const req = parsePlanRequest(params);
+  // A pasted log is checked against its own comp, so any comp only applies without one.
+  const anyComp = !!req?.anyComp && !report;
   let plan: Plan | null = null;
+  let shifts = new Map<number, CompShift>();
   let error: string | null = null;
   if (req) {
     try {
-      plan = buildPlan(await loadKills(req.encounterId, req.difficulty), req.comp, {
-        weight: { now: Date.now(), firstKillsOnly: req.firstKillsOnly },
-      });
+      const kills = await loadKills(req.encounterId, req.difficulty);
+      const weight = { now: Date.now(), firstKillsOnly: req.firstKillsOnly };
+      if (anyComp) {
+        // Every spec, so turning specs on and off in the picker only hides rows.
+        plan = buildPlan(kills, [...HEALER_SPECS], { weight, anyComp: true });
+      } else {
+        plan = buildPlan(kills, req.comp, { weight });
+        shifts = compShifts(plan, buildPlan(kills, [...new Set(req.comp)], { weight, anyComp: true }));
+      }
     } catch (e) {
       error = (e as Error).message;
     }
@@ -86,11 +96,13 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
           difficulty: val("difficulty") === "heroic" ? "heroic" : "mythic",
           comp: parseComp(params),
           firstKillsOnly: val("firstKillsOnly") === "1",
+          anyComp,
         }}
+        live={anyComp && plan !== null}
       />
 
       {error && <p>Couldn&apos;t load kills: {error}</p>}
-      {report && plan && (
+      {report && plan && !anyComp && (
         <nav className="pv-tabs" aria-label="Views">
           {(
             [
@@ -105,8 +117,16 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
           ))}
         </nav>
       )}
-      {plan && view === "guild" && <PlanView plan={plan} logsHref={`/logs?${queryString(params)}`} />}
-      {plan && report && view !== "guild" && <PullsView plan={plan} report={report} view={view} base={base} selected={Number(val("pull"))} />}
+      {plan && (view === "guild" || anyComp) && (
+        <PlanView
+          plan={plan}
+          shifts={shifts}
+          hidden={anyComp ? HEALER_SPECS.filter((s) => !req!.comp.includes(s)) : []}
+          // Any comp's heat map is built from every kill, whichever specs are shown.
+          logsHref={`/logs?${queryString(params, anyComp ? [...HEALER_SPECS] : [])}`}
+        />
+      )}
+      {plan && report && !anyComp && view !== "guild" && <PullsView plan={plan} report={report} view={view} base={base} selected={Number(val("pull"))} />}
     </main>
   );
 }
@@ -118,7 +138,7 @@ function queryString(params: Record<string, string | string[] | undefined>, drop
   return q.toString();
 }
 
-function PlanView({ plan, logsHref }: { plan: Plan; logsHref: string }) {
+function PlanView({ plan, shifts, hidden, logsHref }: { plan: Plan; shifts: Map<number, CompShift>; hidden: HealerSpec[]; logsHref: string }) {
   if (plan.killsUsed.length === 0) return <p>No matching kills yet. Try a looser comp or turn off first kills only.</p>;
   return (
     <section>
@@ -129,7 +149,12 @@ function PlanView({ plan, logsHref }: { plan: Plan; logsHref: string }) {
           See the logs →
         </a>
       </p>
-      <Heatmap desktop={buildTimeline(plan, 4_000)} phone={buildTimeline(plan, 8_000)} />
+      <Heatmap
+        desktop={buildTimeline(plan, 4_000, {}, shifts)}
+        phone={buildTimeline(plan, 8_000, {}, shifts)}
+        hidden={hidden}
+        live={plan.anyComp}
+      />
     </section>
   );
 }
